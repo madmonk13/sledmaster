@@ -4,6 +4,7 @@ import { UPGRADES, WINGS, upgradeCost, levelOf } from './upgrades.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.floor(n).toLocaleString();
+export const MPH = 2.23694; // m/s -> mph
 
 export class UI {
   constructor(handlers) {
@@ -53,6 +54,14 @@ export class UI {
     this.setMode('menu');
   }
 
+  // Flash the fuel gauge after picking up a gas can.
+  refuel() {
+    const el = $('fuel-wrap');
+    el.classList.remove('refuel');
+    void el.offsetWidth; // restart the animation
+    el.classList.add('refuel');
+  }
+
   // which in-world UI is visible for a game mode
   setMode(mode, stats) {
     $('hud').classList.toggle('hidden', mode !== 'run');
@@ -71,7 +80,7 @@ export class UI {
 
   updateHud(run, body, stats, best) {
     $('hud-dist').textContent = `${fmt(run.maxZ)} m`;
-    $('hud-speed').textContent = `${fmt(body.speed * 3.6)} km/h`;
+    $('hud-speed').textContent = `${fmt(body.speed * MPH)} mph`;
     if (run.coins !== this.lastCoins) {
       const el = $('hud-coins');
       el.textContent = fmt(run.coins);

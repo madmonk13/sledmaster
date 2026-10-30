@@ -141,6 +141,14 @@ const chunkGeo = new THREE.IcosahedronGeometry(1, 0);
 const debrisSnowMat = snowBodyMat.clone();
 debrisSnowMat.flatShading = true;
 
+const featherGeo = new THREE.PlaneGeometry(0.09, 0.22);
+const featherMat = new THREE.MeshLambertMaterial({ color: 0xf6f8fb, side: THREE.DoubleSide });
+
+// A penguin lying on its belly reaches this far below its origin (its feet when standing),
+// and its body runs this far ahead of it toward the head, at scale 1.
+const BELLY_DEPTH = 0.44;
+const BODY_LENGTH = 1.3;
+
 export class HazardFx {
   constructor(scene, terrainRef) {
     this.terrainRef = terrainRef; // () => current terrain, for bouncing off the snow
@@ -154,6 +162,8 @@ export class HazardFx {
     }
     this.next = 0;
     this.wobbles = [];
+    this.tumblers = [];
+    this.dazed = [];
   }
 
   spawn(geo, mat, size, pos, vel) {
@@ -169,6 +179,7 @@ export class HazardFx {
     p.vel.copy(vel);
     p.spin.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(14);
     p.life = DEBRIS_LIFE * (0.7 + Math.random() * 0.3);
+    p.floaty = false;
   }
 
   // hit: { snowman, vel } from the physics; vel is the sled's velocity before impact
@@ -207,6 +218,77 @@ export class HazardFx {
     if (hit.snowman.mesh) this.wobble(hit.snowman.mesh, 0.16);
   }
 
+  // A bowled-over penguin flies off ahead of the sled, tumbling, then lands on its belly and
+  // toboggans to a stop, flippers going. It stays lying there (chunk disposal cleans it up).
+  knock(hit) {
+    const pg = hit.penguin;
+    const mesh = pg.mesh;
+    if (!mesh) return;
+    const vel = hit.vel.clone().multiplyScalar(0.85);
+    const side = Math.random() < 0.5 ? -1 : 1;
+    vel.x += side * (1.5 + Math.random() * 2.5);
+    vel.y = Math.max(0, vel.y) + 4 + Math.min(4, hit.speed * 0.12);
+    mesh.rotation.order = 'YXZ';
+    mesh.userData.body.rotation.set(0, 0, 0);
+    mesh.userData.body.position.y = 0;
+    this.tumblers.push({ mesh, vel, flip: 0, spin: 9 + Math.random() * 5, t: 0, landed: false, scale: pg.scale });
+    // a little snow kicked up where it stood
+    const pos = new THREE.Vector3();
+    const v = new THREE.Vector3();
+    for (let i = 0; i < 6; i++) {
+      pos.set(pg.x + (Math.random() - 0.5) * 0.6, mesh.position.y + 0.2, pg.z + (Math.random() - 0.5) * 0.6);
+      v.set((Math.random() - 0.5) * 3, 1.5 + Math.random() * 2.5, (Math.random() - 0.5) * 3).addScaledVector(hit.vel, 0.3);
+      this.spawn(chunkGeo, debrisSnowMat, 0.08 + Math.random() * 0.1, pos, v);
+    }
+  }
+
+  // A bird strike: a puff of feathers, then the bird tumbles for a moment before it
+  // flaps off up and away, out of the sled's path.
+  birdHit(hit) {
+    const mesh = hit.bird.mesh;
+    if (!mesh) return;
+    const pos = new THREE.Vector3();
+    const vel = new THREE.Vector3();
+    for (let i = 0; i < 14; i++) {
+      pos.copy(mesh.position).add(vel.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.6));
+      vel.copy(hit.vel).multiplyScalar(0.3 + Math.random() * 0.3);
+      vel.x += (Math.random() - 0.5) * 6;
+      vel.y += 1 + Math.random() * 3;
+      vel.z += (Math.random() - 0.5) * 6;
+      this.spawn(featherGeo, featherMat, 1, pos, vel);
+      this.pieces[(this.next + DEBRIS - 1) % DEBRIS].floaty = true;
+    }
+    const away = hit.vel.clone().setY(0);
+    if (away.lengthSq() < 1e-6) away.set(0, 0, 1);
+    away.normalize();
+    // knocked sideways off the sled's line, then away
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const vx = away.x * 0.7 - away.z * side * 0.7, vz = away.z * 0.7 + away.x * side * 0.7;
+    this.dazed.push({ mesh, t: 0, vel: new THREE.Vector3(vx * 14 + hit.vel.x * 0.4, 2, vz * 14 + hit.vel.z * 0.4), spin: (8 + Math.random() * 6) * side });
+  }
+
+  // Highest snow under a lying penguin, sampled from its feet to its head, so no part of
+  // it sinks in on a slope or over a bump.
+  slideFloor(mesh, scale) {
+    const terrain = this.terrainRef();
+    if (!terrain) return 0;
+    const hx = -Math.sin(mesh.rotation.y), hz = -Math.cos(mesh.rotation.y); // head direction
+    let floor = -Infinity;
+    for (const k of [0, 0.5, 1]) {
+      const d = k * BODY_LENGTH * scale;
+      floor = Math.max(floor, terrain.height(mesh.position.x + hx * d, mesh.position.z + hz * d));
+    }
+    return floor;
+  }
+
+  // Too slow to bowl it over: the penguin rocks back, flapping indignantly.
+  penguinBonk(hit) {
+    const mesh = hit.penguin.mesh;
+    if (!mesh) return;
+    this.wobble(mesh, 0.22);
+    mesh.userData.indignant = 1.2;
+  }
+
   wobble(mesh, amp) {
     if (this.wobbles.some((w) => w.mesh === mesh)) return;
     this.wobbles.push({ mesh, t: 0, amp, baseX: mesh.rotation.x, baseZ: mesh.rotation.z });
@@ -218,6 +300,11 @@ export class HazardFx {
     const terrain = this.terrainRef();
     const pos = new THREE.Vector3();
     const vel = new THREE.Vector3();
+    if (o.type === 'bear' && o.mesh) {
+      this.wobble(o.mesh, 0.02 + 0.03 * hit.severity);
+      o.mesh.userData.startled = 1.5; // snaps its head round to the sled (see update)
+      o.mesh.userData.lookAt = Math.atan2(hit.x - o.x, hit.z - o.z) - o.rot;
+    }
     if (o.type === 'tree') {
       if (o.mesh) this.wobble(o.mesh, 0.04 + 0.08 * hit.severity);
       const base = o.mesh ? o.mesh.position.y : terrain.height(o.x, o.z);
@@ -250,7 +337,13 @@ export class HazardFx {
         m.visible = false;
         continue;
       }
-      p.vel.y -= 12 * dt;
+      if (p.floaty) {
+        // feathers: drag hard and drift down slowly
+        p.vel.multiplyScalar(Math.max(0, 1 - dt * 2.5));
+        p.vel.y = Math.max(p.vel.y - 6 * dt, -1.2);
+      } else {
+        p.vel.y -= 12 * dt;
+      }
       m.position.addScaledVector(p.vel, dt);
       m.rotation.x += p.spin.x * dt;
       m.rotation.y += p.spin.y * dt;
@@ -264,6 +357,68 @@ export class HazardFx {
         p.spin.multiplyScalar(0.7);
       }
       m.scale.setScalar(p.size * Math.min(1, p.life / 0.4));
+    }
+
+    for (let i = this.tumblers.length - 1; i >= 0; i--) {
+      const tb = this.tumblers[i];
+      const m = tb.mesh;
+      tb.t += dt;
+      const flippers = m.userData.flippers;
+      const ground = terrain ? terrain.height(m.position.x, m.position.z) : 0;
+      const hSpeed = Math.hypot(tb.vel.x, tb.vel.z);
+      if (hSpeed > 0.3) m.rotation.y = Math.atan2(-tb.vel.x, -tb.vel.z); // head (-z) leads
+      if (!tb.landed) {
+        tb.vel.y -= 12 * dt;
+        m.position.addScaledVector(tb.vel, dt);
+        tb.flip -= tb.spin * dt;
+        m.rotation.x = tb.flip;
+        if (tb.vel.y < 0 && m.position.y < ground + BELLY_DEPTH * tb.scale) {
+          tb.landed = true;
+          tb.flip = (((tb.flip % (Math.PI * 2)) - Math.PI * 2) % (Math.PI * 2)); // into (-2pi, 0]
+          if (tb.flip < -1.5 * Math.PI) tb.flip += Math.PI * 2;
+        }
+      } else {
+        // belly-sliding: ease onto the belly, follow the snow, slow down
+        tb.flip += (-Math.PI / 2 - tb.flip) * Math.min(1, dt * 10);
+        m.rotation.x = tb.flip;
+        const keep = Math.max(0, hSpeed - 4 * dt) / Math.max(hSpeed, 1e-6);
+        tb.vel.x *= keep;
+        tb.vel.z *= keep;
+        m.position.x += tb.vel.x * dt;
+        m.position.z += tb.vel.z * dt;
+        m.position.y = this.slideFloor(m, tb.scale) + BELLY_DEPTH * tb.scale;
+      }
+      for (const f of flippers) f.rotation.z = f.userData.side * (0.6 + 0.7 * Math.sin(tb.t * 26));
+      if (tb.t > 6) {
+        for (const f of flippers) f.rotation.z = f.userData.side * 1.2; // splayed out, having a lie down
+        this.tumblers.splice(i, 1);
+      }
+    }
+
+    for (let i = this.dazed.length - 1; i >= 0; i--) {
+      const d = this.dazed[i];
+      const m = d.mesh;
+      d.t += dt;
+      const wings = m.userData.wings;
+      if (d.t < 0.7) {
+        // tumbling: spin and drop, wings askew
+        d.vel.y -= 9 * dt;
+        m.rotation.z += d.spin * dt;
+        m.rotation.x += d.spin * 0.6 * dt;
+        for (const w of wings) w.rotation.z = w.userData.side * 1.1;
+      } else {
+        // recovered: level out and climb away, flapping hard
+        m.rotation.x *= Math.max(0, 1 - dt * 6);
+        m.rotation.z *= Math.max(0, 1 - dt * 6);
+        d.vel.y += (6 - d.vel.y) * Math.min(1, dt * 2);
+        m.rotation.y = Math.atan2(d.vel.x, d.vel.z);
+        for (const w of wings) w.rotation.z = w.userData.side * Math.sin(d.t * 22) * 0.8;
+      }
+      m.position.addScaledVector(d.vel, dt);
+      if (d.t > 5) {
+        m.visible = false;
+        this.dazed.splice(i, 1);
+      }
     }
 
     for (let i = this.wobbles.length - 1; i >= 0; i--) {

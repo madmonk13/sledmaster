@@ -3,7 +3,7 @@
 // into-ground velocity is removed, so slopes, crests and jumps all fall out naturally.
 
 import * as THREE from 'three';
-import { SNOWMAN_H, SNOWMAN_R } from './terrain.js';
+import { SNOWMAN_H, SNOWMAN_R, PENGUIN_R } from './terrain.js';
 
 export const GRAVITY = 12;
 export const ICE_MU = 0.01;
@@ -16,6 +16,10 @@ const PAD_SURGE = 0.5; // ...then this many seconds of extra push
 const PAD_ACCEL = 9;
 export const SHATTER_SPEED = 12; // m/s: at or above this a snowman bursts, below it the sled stops dead
 export const SHATTER_KEEP = 0.55; // share of speed kept after smashing through
+export const KNOCK_SPEED = 8; // m/s: at or above this a penguin gets bowled over, below it the sled stops
+export const KNOCK_KEEP = 0.8; // penguins are light: most of your speed survives
+const STALL_TIME = 1.5; // seconds for the wings to recover after a bird strike...
+const STALL_DEPTH = 0.8; // ...starting with lift cut by this share
 const SLED_R = 0.6;
 // Solid obstacles (trees, igloos): the into-obstacle part of the velocity is always lost, and the
 // part along the surface is scrubbed by up to this share on a head-on hit (less when glancing).
@@ -45,6 +49,10 @@ export class SledBody {
     this.padHits = 0; // pads hit since the game last read it
     this.snowmanHits = []; // { snowman, kind: 'smash' | 'bonk', speed, vel } since the game last read it
     this.lastSnowman = null;
+    this.penguinHits = []; // { penguin, kind: 'knock' | 'bonk', speed, vel } since last read
+    this.lastPenguin = null;
+    this.birdHits = []; // { bird, kind: 'knock' | 'bonk', speed, vel } since last read
+    this.stall = 0; // seconds of lift loss left after hitting a bird
     this.obstacleHits = []; // { obstacle, severity 0..1 (1 = head-on), speed, x, z } since last read
     this.lastObstacle = null;
     this.landing = null; // { impact, airTime } set on the step the sled lands
@@ -109,6 +117,8 @@ export class SledBody {
 
     const ground = terrain.height(p.x, p.z);
     this.checkSnowman(terrain, ground);
+    this.checkPenguin(terrain, ground);
+    this.checkBird(terrain, dt);
     this.checkObstacle(terrain, ground);
     const wasAirTime = this.airTime;
     if (p.y <= ground) {
@@ -164,18 +174,68 @@ export class SledBody {
       this.surge = 0;
     }
     this.lastSnowman = sm;
-    // still touching (e.g. rocketing into it): push out and drop the inward velocity so you can slide round
-    const dx = p.x - sm.x, dz = p.z - sm.z;
+    this.pushOut(sm.x, sm.z, SNOWMAN_R + SLED_R);
+  }
+
+  // Still touching something you didn't knock down (e.g. rocketing into it): push out and
+  // drop the inward velocity so you can slide round it.
+  pushOut(cx, cz, reach) {
+    const p = this.pos, v = this.vel;
+    const dx = p.x - cx, dz = p.z - cz;
     const d = Math.hypot(dx, dz) || 1;
     const nx = dx / d, nz = dz / d;
-    const reach = SNOWMAN_R + SLED_R;
-    p.x = sm.x + nx * reach;
-    p.z = sm.z + nz * reach;
+    p.x = cx + nx * reach;
+    p.z = cz + nz * reach;
     const vin = v.x * nx + v.z * nz;
     if (vin < 0) {
       v.x -= vin * nx;
       v.z -= vin * nz;
     }
+  }
+
+  // Penguins work like snowmen with a lower bar: fast enough and they go flying (belly-first
+  // tobogganing off down the hill), too slow and they stand their ground and stop you.
+  checkPenguin(terrain, ground) {
+    const p = this.pos, v = this.vel;
+    const pg = terrain.penguinAt(p.x, p.z, SLED_R, p.y - ground);
+    if (!pg) {
+      this.lastPenguin = null;
+      return;
+    }
+    const speed = v.length();
+    if (pg !== this.lastPenguin) {
+      if (speed >= KNOCK_SPEED) {
+        pg.down = true;
+        this.penguinHits.push({ penguin: pg, kind: 'knock', speed, vel: v.clone() });
+        v.multiplyScalar(KNOCK_KEEP);
+        return;
+      }
+      this.penguinHits.push({ penguin: pg, kind: 'bonk', speed, vel: v.clone() });
+      v.set(0, Math.min(0, v.y), 0);
+      this.surge = 0;
+    }
+    this.lastPenguin = pg;
+    this.pushOut(pg.x, pg.z, PENGUIN_R * pg.scale + SLED_R);
+  }
+
+  // Birds act like penguins in the air: fast enough and you scatter one (losing a fifth of
+  // your speed), too slow and it stops you dead and you drop. Either way the impact knocks
+  // the wind out of the wings for a moment, so lift recovers over STALL_TIME.
+  checkBird(terrain, dt) {
+    this.stall = Math.max(0, this.stall - dt);
+    if (this.contact) return;
+    const p = this.pos, v = this.vel;
+    const bird = terrain.birdAt(p.x, p.y + 0.7, p.z, SLED_R);
+    if (!bird) return;
+    bird.down = true;
+    const speed = v.length();
+    const kind = speed >= KNOCK_SPEED ? 'knock' : 'bonk';
+    this.birdHits.push({ bird, kind, speed, vel: v.clone() });
+    if (kind === 'knock') v.multiplyScalar(KNOCK_KEEP);
+    else v.set(0, Math.min(0, v.y), 0);
+    if (v.y > 0) v.y *= KNOCK_KEEP;
+    this.stall = STALL_TIME;
+    this.surge = 0;
   }
 
   // Trees and igloos never break. Hitting one head-on stops you almost dead; a glancing
@@ -256,7 +316,8 @@ export class SledBody {
     const lx = (-v.x / sp * uy) / perpLen;
     const ly = (1 - uy * uy) / perpLen;
     const lz = (-v.z / sp * uy) / perpLen;
-    const lift = Math.min(wing.lift * LIFT_K * sp * sp * align * this.deploy, 1.2 * GRAVITY);
+    const stalled = 1 - STALL_DEPTH * (this.stall / STALL_TIME);
+    const lift = Math.min(wing.lift * LIFT_K * sp * sp * align * this.deploy, 1.2 * GRAVITY) * stalled;
     v.x += lx * lift * dt;
     v.y += ly * lift * dt;
     v.z += lz * lift * dt;

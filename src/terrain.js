@@ -7,8 +7,12 @@ import { mulberry32, hash1, hash2 } from './rng.js';
 
 export const CHUNK_LEN = 100;
 export const TRACK_HALF = 26; // half-width of the sledding lane; banks rise beyond it
-const MESH_HALF = 78;
+const MESH_HALF = 78; // fine grid either side of the lane (meshHeight() relies on its spacing)
 const SEG_X = 52;
+// Beyond the fine grid the snow carries on as ever-wider columns of rolling hills out to
+// OUTER_HALF, past the fog, so from high up there's no edge between course and backdrop.
+const OUTER_HALF = 720;
+const OUTER_SEG = 14;
 const SEG_Z = 50;
 const START_DROP = 22; // height of the opening slope below the launch platform
 const START_LEN = 70;
@@ -29,7 +33,38 @@ const IGLOO_START_CHUNK = 3;
 const IGLOO_DOME_R = 1;
 const IGLOO_TUNNEL = { z: 1.12, r: 0.3 };
 const IGLOO_HEIGHT = 1.06;
+const IGLOO_MAX_RISE = 0.3; // most the snow may vary across an igloo's footprint, so none get half-buried
+const PENGUIN_START_CHUNK = 2;
+export const PENGUIN_R = 0.45; // collision radius at scale 1
+export const PENGUIN_H = 1.35; // clear this much air over the snow to jump a penguin
+const PENGUIN_FOOT_Y = 0.035; // foot centre above the snow on flat ground (feet are 0.04 thick)
+const BEAR_START_CHUNK = 4;
+const BIRD_START_CHUNK = 2;
+export const BIRD_R = 0.8; // collision radius of a bird
+const BIRD_WRAP = 110; // flocks cross the course and loop round beyond the banks
+const CAN_START_CHUNK = 3;
+const CAN_CHANCE = 0.14; // per 100 m chunk, so roughly one gas can every 700 m
+const BEAR_H = 1.75;
+const BEAR_PAWS = [[-0.42, -0.67], [0.42, -0.67], [-0.42, 0.78], [0.42, 0.78]]; // (x, z) at scale 1
+const BEAR_MAX_RISE = 0.8; // steeper spots than this would tip a bear over too far
+// Polar bear footprint at scale 1, along its body axis (nose toward +z): rump, chest, head.
+const BEAR_CIRCLES = [{ z: -0.45, r: 0.8 }, { z: 0.55, r: 0.8 }, { z: 1.55, r: 0.45 }];
 const CELL_X = (MESH_HALF * 2) / SEG_X;
+// x of every vertex column: outer columns widen geometrically from CELL_X out to OUTER_HALF
+const COLUMN_X = (() => {
+  let r = 1.2; // solve CELL_X * (r + r^2 + ... + r^n) = OUTER_HALF - MESH_HALF for r
+  for (let k = 0; k < 60; k++) {
+    let sum = 0;
+    for (let j = 1; j <= OUTER_SEG; j++) sum += CELL_X * r ** j;
+    r *= Math.pow((OUTER_HALF - MESH_HALF) / sum, 1 / OUTER_SEG / 2);
+  }
+  const outer = [];
+  let x = MESH_HALF;
+  for (let j = 1; j <= OUTER_SEG; j++) outer.push((x += CELL_X * r ** j));
+  outer[OUTER_SEG - 1] = OUTER_HALF;
+  const inner = Array.from({ length: SEG_X + 1 }, (_, i) => i * CELL_X - MESH_HALF);
+  return [...outer.map((v) => -v).reverse(), ...inner, ...outer];
+})();
 const CELL_Z = CHUNK_LEN / SEG_Z;
 
 const snowMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
@@ -170,6 +205,99 @@ function buildLaneTree(scale) {
   return g;
 }
 
+// Penguins on the course: a smaller cousin of the player, facing uphill (-z) toward the
+// oncoming sled. The parts live in an inner group so the idle waddle (animate()) and
+// hit wobbles/tumbles (effects.js) don't fight over the same rotation.
+const pgSmooth = (color, shininess) => new THREE.MeshPhongMaterial({ color, shininess, specular: 0x222222 });
+const pgBlack = pgSmooth(0x23262e, 30);
+const pgWhite = pgSmooth(0xf7f7f2, 6);
+const pgOrange = pgSmooth(0xff9a2e, 20);
+const pgBallGeo = new THREE.SphereGeometry(1, 16, 12);
+const pgBeakGeo = new THREE.ConeGeometry(0.065, 0.18, 10).rotateX(-Math.PI / 2); // points -z
+
+function buildPenguin(scale) {
+  const g = new THREE.Group();
+  const body = new THREE.Group();
+  g.add(body);
+  const part = (mat, sx, sy, sz, x, y, z) => {
+    const m = new THREE.Mesh(pgBallGeo, mat);
+    m.scale.set(sx, sy, sz);
+    m.position.set(x, y, z);
+    body.add(m);
+    return m;
+  };
+  part(pgBlack, 0.4, 0.52, 0.38, 0, 0.52, 0).castShadow = true;
+  part(pgWhite, 0.29, 0.37, 0.2, 0, 0.48, -0.22);
+  part(pgBlack, 0.27, 0.27, 0.27, 0, 1.05, 0).castShadow = true;
+  part(pgWhite, 0.19, 0.17, 0.11, 0, 1.04, -0.18);
+  const beak = new THREE.Mesh(pgBeakGeo, pgOrange);
+  beak.position.set(0, 0.99, -0.32);
+  body.add(beak);
+  const flippers = [];
+  const feet = [];
+  for (const side of [-1, 1]) {
+    part(pgBlack, 0.04, 0.04, 0.04, side * 0.08, 1.1, -0.25);
+    feet.push(part(pgOrange, 0.12, 0.04, 0.17, side * 0.14, PENGUIN_FOOT_Y, -0.12));
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.36, 0.78, 0);
+    const flipper = new THREE.Mesh(pgBallGeo, pgBlack);
+    flipper.scale.set(0.06, 0.3, 0.15);
+    flipper.position.y = -0.26;
+    pivot.add(flipper);
+    pivot.rotation.z = side * 0.25;
+    pivot.userData.side = side;
+    body.add(pivot);
+    flippers.push(pivot);
+  }
+  g.scale.setScalar(scale);
+  g.userData.body = body;
+  g.userData.flippers = flippers;
+  g.userData.feet = feet;
+  return g;
+}
+
+// Polar bear, low-poly like the scenery, nose along +z. The head is its own group so it
+// can look around while the bear stands there.
+const bearFur = new THREE.MeshLambertMaterial({ color: 0xf2ecd9, flatShading: true });
+const bearDark = new THREE.MeshLambertMaterial({ color: 0x1f2126, flatShading: true });
+const bearBallGeo = new THREE.SphereGeometry(1, 10, 8);
+const bearLegGeo = new THREE.CylinderGeometry(0.2, 0.24, 0.9, 7).translate(0, 0.45, 0);
+
+function buildBear(scale) {
+  const g = new THREE.Group();
+  const lump = (parent, mat, sx, sy, sz, x, y, z) => {
+    const m = new THREE.Mesh(bearBallGeo, mat);
+    m.scale.set(sx, sy, sz);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    parent.add(m);
+    return m;
+  };
+  lump(g, bearFur, 0.72, 0.62, 1.15, 0, 1.0, -0.1); // body
+  lump(g, bearFur, 0.66, 0.6, 0.7, 0, 1.15, 0.6); // shoulders
+  lump(g, bearFur, 0.1, 0.1, 0.1, 0, 1.1, -1.25); // tail
+  for (const [x, z] of [[-0.4, -0.75], [0.4, -0.75], [-0.42, 0.7], [0.42, 0.7]]) {
+    const leg = new THREE.Mesh(bearLegGeo, bearFur);
+    leg.position.set(x, 0, z);
+    leg.castShadow = true;
+    g.add(leg);
+    lump(g, bearFur, 0.26, 0.1, 0.32, x, 0.06, z + 0.08); // paw
+  }
+  const head = new THREE.Group();
+  head.position.set(0, 1.25, 1.2);
+  g.add(head);
+  lump(head, bearFur, 0.4, 0.36, 0.45, 0, 0, 0.15);
+  lump(head, bearFur, 0.21, 0.18, 0.28, 0, -0.08, 0.55); // snout
+  lump(head, bearDark, 0.08, 0.06, 0.06, 0, -0.02, 0.82); // nose
+  for (const side of [-1, 1]) {
+    lump(head, bearDark, 0.045, 0.045, 0.045, side * 0.16, 0.12, 0.47); // eye
+    lump(head, bearFur, 0.11, 0.11, 0.07, side * 0.27, 0.32, 0.02); // ear
+  }
+  g.scale.setScalar(scale);
+  g.userData.head = head;
+  return g;
+}
+
 // The igloo comes from a glTF file loaded at startup (see main.js). Until it arrives,
 // or if it fails to load, a plain snow dome stands in.
 let iglooTemplate = null;
@@ -202,6 +330,115 @@ function buildIgloo(scale) {
   return g;
 }
 
+// Snow gull, low-poly, flying along +z (turned to face its direction of travel). Each wing
+// is a pivot so animate() can flap it.
+const birdWhite = new THREE.MeshLambertMaterial({ color: 0xf6f8fb, flatShading: true });
+const birdGrey = new THREE.MeshLambertMaterial({ color: 0x8e9aab, flatShading: true });
+const birdDark = new THREE.MeshLambertMaterial({ color: 0x2a2d33, flatShading: true });
+const birdBeakMat = new THREE.MeshLambertMaterial({ color: 0xffb02e, flatShading: true });
+const birdWingMat = new THREE.MeshLambertMaterial({ color: 0xf6f8fb, flatShading: true, side: THREE.DoubleSide });
+const birdTipMat = new THREE.MeshLambertMaterial({ color: 0x2a2d33, flatShading: true, side: THREE.DoubleSide });
+const birdBodyGeo = new THREE.SphereGeometry(1, 8, 6);
+const birdBeakGeo = new THREE.ConeGeometry(0.06, 0.2, 5).rotateX(Math.PI / 2); // points +z
+const birdWingGeo = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0.18);
+  shape.lineTo(0.55, 0.12);
+  shape.lineTo(0.95, -0.12);
+  shape.lineTo(0.5, -0.12);
+  shape.lineTo(0, -0.16);
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape).rotateX(Math.PI / 2); // flat, spanning +x
+})();
+const birdTipGeo = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(0.62, 0.1);
+  shape.lineTo(0.95, -0.12);
+  shape.lineTo(0.62, -0.12);
+  shape.closePath();
+  return new THREE.ShapeGeometry(shape).rotateX(Math.PI / 2).translate(0, -0.005, 0);
+})();
+
+function buildBird() {
+  const g = new THREE.Group();
+  const lump = (mat, sx, sy, sz, x, y, z) => {
+    const m = new THREE.Mesh(birdBodyGeo, mat);
+    m.scale.set(sx, sy, sz);
+    m.position.set(x, y, z);
+    g.add(m);
+    return m;
+  };
+  lump(birdWhite, 0.2, 0.18, 0.45, 0, 0, 0).castShadow = true;
+  lump(birdWhite, 0.15, 0.14, 0.16, 0, 0.08, 0.42);
+  lump(birdGrey, 0.12, 0.05, 0.2, 0, 0.02, -0.48); // tail
+  for (const side of [-1, 1]) lump(birdDark, 0.025, 0.025, 0.025, side * 0.1, 0.12, 0.5);
+  const beak = new THREE.Mesh(birdBeakGeo, birdBeakMat);
+  beak.position.set(0, 0.05, 0.62);
+  g.add(beak);
+  const wings = [];
+  for (const side of [-1, 1]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.15, 0.06, 0.05);
+    pivot.scale.x = side;
+    const wing = new THREE.Mesh(birdWingGeo, birdWingMat);
+    const tip = new THREE.Mesh(birdTipGeo, birdTipMat);
+    for (const m of [wing, tip]) {
+      m.castShadow = true;
+      pivot.add(m);
+    }
+    pivot.userData.side = side;
+    g.add(pivot);
+    wings.push(pivot);
+  }
+  g.scale.setScalar(1.4);
+  g.userData.wings = wings;
+  return g;
+}
+
+// Red jerry can that tops up rocket fuel. Origin at its centre; a soft glow disc sits
+// on the snow underneath so it stands out at speed.
+const canRedMat = new THREE.MeshLambertMaterial({ color: 0xe0322b, emissive: 0x4a0a06, flatShading: true });
+const canCapMat = new THREE.MeshLambertMaterial({ color: 0xffd23a, emissive: 0x5a4400 });
+const canDarkMat = new THREE.MeshLambertMaterial({ color: 0x2a2d33 });
+const canBodyGeo = new THREE.BoxGeometry(0.62, 0.8, 0.3);
+const canRibGeo = new THREE.BoxGeometry(0.66, 0.06, 0.34);
+const canHandleGeo = new THREE.TorusGeometry(0.13, 0.04, 6, 12, Math.PI);
+const canSpoutGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.2, 8);
+const canGlowTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,170,60,0.8)');
+  g.addColorStop(1, 'rgba(255,170,60,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const canGlowMat = new THREE.MeshBasicMaterial({ map: canGlowTex, transparent: true, depthWrite: false });
+const canGlowGeo = new THREE.PlaneGeometry(2.6, 2.6).rotateX(-Math.PI / 2);
+
+function buildCan() {
+  const can = new THREE.Group();
+  const body = new THREE.Mesh(canBodyGeo, canRedMat);
+  body.castShadow = true;
+  can.add(body);
+  for (const y of [-0.15, 0.15]) {
+    const rib = new THREE.Mesh(canRibGeo, canRedMat);
+    rib.position.y = y;
+    can.add(rib);
+  }
+  const handle = new THREE.Mesh(canHandleGeo, canDarkMat);
+  handle.position.set(-0.12, 0.4, 0);
+  can.add(handle);
+  const spout = new THREE.Mesh(canSpoutGeo, canCapMat);
+  spout.position.set(0.2, 0.47, 0);
+  spout.rotation.z = -0.5;
+  can.add(spout);
+  can.scale.setScalar(1.5);
+  return can;
+}
+
 export function animatePads(dt) {
   padTex.offset.y = (padTex.offset.y + dt * 2.2) % 1;
 }
@@ -212,15 +449,19 @@ function smooth(t) {
 }
 
 export class Terrain {
-  constructor(scene, seed) {
+  constructor(scene, seed, { fuelCans = false } = {}) {
     this.scene = scene;
     this.seed = seed >>> 0;
+    this.fuelCans = fuelCans; // place gas cans (pointless without a rocket)
     this.chunks = new Map();
     this.icePatches = new Map();
     this.ramps = new Map();
     this.pads = new Map();
     this.snowmen = new Map();
     this.obstacles = new Map();
+    this.penguins = new Map();
+    this.birds = new Map();
+    this.clock = 0; // seconds, advanced by animate(); birds fly on it
   }
 
   // ---------- height field ----------
@@ -266,7 +507,12 @@ export class Terrain {
     h += 1.6 * (this.noise1(z / 140, 37) * 2 - 1) * (x / TRACK_HALF) * smooth((z - 100) / 100);
     // banks either side of the lane
     const b = Math.abs(x) - TRACK_HALF;
-    if (b > 0) h += Math.min(b, 18) * 0.5 + Math.min(b * b, 324) * 0.02 + Math.max(0, b - 18) * 0.25;
+    if (b > 0) {
+      h += Math.min(b, 18) * 0.5 + Math.min(b * b, 324) * 0.02 + Math.max(0, b - 18) * 0.25;
+      // further out: broad rolling hills that grow with distance from the lane
+      const far = smooth((b - 40) / 120);
+      if (far > 0) h += far * (45 * (this.noise2(x / 160, z / 160, 41) - 0.3) + 18 * (this.noise2(x / 60, z / 60, 43) - 0.5));
+    }
     // small bumps for texture
     h += 0.06 * (this.noise2(x / 7, z / 7, 5) * 2 - 1) * smooth((z - 10) / 30);
     return h;
@@ -415,7 +661,7 @@ export class Terrain {
     return null;
   }
 
-  // ---------- solid obstacles: lane trees and igloos ----------
+  // ---------- solid obstacles: lane trees, igloos and polar bears ----------
 
   // Each obstacle is a few collision circles plus a height you can jump over.
   // They keep clear of ramps (and landings), pads, snowmen and each other.
@@ -433,11 +679,24 @@ export class Terrain {
         !pads.some((p) => Math.abs(x - p.x) < PAD_W / 2 + foot + 1 && z > p.z - foot - 6 && z < p.z + PAD_LEN + foot + 6) &&
         !snowmen.some((s) => Math.hypot(x - s.x, z - s.z) < foot + 5) &&
         !list.some((o) => Math.hypot(x - o.x, z - o.z) < foot + o.foot + 4);
-      const place = (foot, halfWidth, make) => {
-        for (let attempt = 0; attempt < 8; attempt++) {
+      // How much the snow rises and falls across a footprint of this radius.
+      const unevenness = (x, z, foot) => {
+        let lo = this.baseHeight(x, z), hi = lo;
+        for (let k = 0; k < 12; k++) {
+          const a = (k / 12) * Math.PI * 2;
+          for (const d of [0.5, 1]) {
+            const h = this.baseHeight(x + Math.cos(a) * foot * d, z + Math.sin(a) * foot * d);
+            lo = Math.min(lo, h);
+            hi = Math.max(hi, h);
+          }
+        }
+        return hi - lo;
+      };
+      const place = (foot, halfWidth, make, maxRise = Infinity, attempts = 8) => {
+        for (let attempt = 0; attempt < attempts; attempt++) {
           const x = (r() * 2 - 1) * halfWidth;
           const z = ci * CHUNK_LEN + 5 + foot + r() * (CHUNK_LEN - 10 - foot * 2);
-          if (fits(x, z, foot)) {
+          if (fits(x, z, foot) && (maxRise === Infinity || unevenness(x, z, foot) <= maxRise)) {
             list.push(make(x, z));
             return;
           }
@@ -463,7 +722,18 @@ export class Terrain {
             { x: x + Math.sin(rot) * IGLOO_TUNNEL.z * scale, z: z + Math.cos(rot) * IGLOO_TUNNEL.z * scale, r: IGLOO_TUNNEL.r * scale },
           ],
           mesh: null,
-        }));
+        }), IGLOO_MAX_RISE, 24);
+      }
+      const bears = ci >= BEAR_START_CHUNK ? (r() < 0.3 ? 1 : 0) + (ci > 12 && r() < 0.15 ? 1 : 0) : 0;
+      for (let i = 0; i < bears; i++) {
+        const scale = 1 + r() * 0.2;
+        const rot = r() * Math.PI * 2;
+        const sin = Math.sin(rot), cos = Math.cos(rot);
+        place(2.1 * scale, TRACK_HALF - 4, (x, z) => ({
+          type: 'bear', x, z, scale, rot, foot: 2.1 * scale, h: BEAR_H * scale,
+          circles: BEAR_CIRCLES.map((c) => ({ x: x + sin * c.z * scale, z: z + cos * c.z * scale, r: c.r * scale })),
+          mesh: null,
+        }), BEAR_MAX_RISE, 16);
       }
     }
     this.obstacles.set(ci, list);
@@ -481,6 +751,201 @@ export class Terrain {
       }
     }
     return null;
+  }
+
+  // ---------- penguins ----------
+
+  // Little huddles of one to three. They keep clear of ramps, pads and every other hazard.
+  penguinsFor(ci) {
+    let list = this.penguins.get(ci);
+    if (list) return list;
+    list = [];
+    if (ci >= PENGUIN_START_CHUNK) {
+      const r = mulberry32((this.seed ^ Math.imul(ci + 13, 0x2c1b3c6d)) >>> 0);
+      const groups = Math.floor(r() * (1.6 + Math.min(1.6, ci * 0.05)));
+      const ramps = this.rampsFor(ci);
+      const pads = this.padsFor(ci);
+      const snowmen = this.snowmenFor(ci);
+      const obstacles = this.obstaclesFor(ci);
+      const clear = (x, z) =>
+        Math.abs(x) < TRACK_HALF - 2 &&
+        !ramps.some((p) => Math.abs(x - p.x) < p.w / 2 + 2 && z > p.lip - p.len - 3 && z < p.lip + 16) &&
+        !pads.some((p) => Math.abs(x - p.x) < PAD_W / 2 + 2 && z > p.z - 6 && z < p.z + PAD_LEN + 6) &&
+        !snowmen.some((s) => Math.hypot(x - s.x, z - s.z) < 4) &&
+        !obstacles.some((o) => Math.hypot(x - o.x, z - o.z) < o.foot + 3) &&
+        !list.some((p) => Math.hypot(x - p.x, z - p.z) < 1.3) &&
+        !this.onIceEdge(x, z, 0.6);
+      for (let i = 0; i < groups; i++) {
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const x = (r() * 2 - 1) * (TRACK_HALF - 4);
+          const z = ci * CHUNK_LEN + 6 + r() * (CHUNK_LEN - 12);
+          if (!clear(x, z)) continue;
+          const size = 1 + Math.floor(r() * 3);
+          for (let k = 0; k < size; k++) {
+            const a = r() * Math.PI * 2, d = k === 0 ? 0 : 1.3 + r() * 0.8;
+            const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+            if (k > 0 && !clear(px, pz)) continue;
+            list.push({ x: px, z: pz, scale: 0.85 + r() * 0.25, rot: (r() - 0.5) * 1.2, phase: r() * 10, down: false, mesh: null });
+          }
+          break;
+        }
+      }
+    }
+    this.penguins.set(ci, list);
+    return list;
+  }
+
+  // The standing penguin a sled at (x, z) with this radius runs into, unless it is high enough to clear it.
+  penguinAt(x, z, radius, heightAbove) {
+    for (const p of this.penguinsFor(Math.floor(z / CHUNK_LEN))) {
+      if (p.down || heightAbove > PENGUIN_H * p.scale) continue;
+      const reach = PENGUIN_R * p.scale + radius;
+      const dx = x - p.x, dz = z - p.z;
+      if (dx * dx + dz * dz < reach * reach) return p;
+    }
+    return null;
+  }
+
+  // ---------- birds ----------
+
+  // Small V-shaped flocks crossing the course at jumping and gliding heights.
+  birdsFor(ci) {
+    let list = this.birds.get(ci);
+    if (list) return list;
+    list = [];
+    if (ci >= BIRD_START_CHUNK) {
+      const r = mulberry32((this.seed ^ Math.imul(ci + 19, 0x5f356495)) >>> 0);
+      const flocks = Math.floor(r() * (1.3 + Math.min(1.2, ci * 0.04)));
+      for (let f = 0; f < flocks; f++) {
+        const z = ci * CHUNK_LEN + 10 + r() * (CHUNK_LEN - 20);
+        const y = this.profile(z) + 5 + r() * 13;
+        const dir = r() < 0.5 ? -1 : 1;
+        const speed = 10 + r() * 4; // gull cruising speed
+        const x0 = (r() * 2 - 1) * BIRD_WRAP;
+        const size = 2 + Math.floor(r() * 4);
+        for (let k = 0; k < size; k++) {
+          const rank = Math.ceil(k / 2), wing = k % 2 ? 1 : -1;
+          list.push({
+            x0: x0 - dir * rank * 1.6, z: z + wing * rank * 1.5, y: y + (r() - 0.5) * 0.6,
+            dir, speed, flap: r() * 10, down: false, mesh: null,
+          });
+        }
+      }
+    }
+    this.birds.set(ci, list);
+    return list;
+  }
+
+  birdX(b) {
+    const x = b.x0 + b.dir * b.speed * this.clock + BIRD_WRAP;
+    return (((x % (2 * BIRD_WRAP)) + 2 * BIRD_WRAP) % (2 * BIRD_WRAP)) - BIRD_WRAP;
+  }
+
+  // The flying bird a sled at (x, y, z) with this radius runs into.
+  birdAt(x, y, z, radius) {
+    const ci = Math.floor(z / CHUNK_LEN);
+    for (let c = ci - 1; c <= ci + 1; c++) {
+      for (const b of this.birdsFor(c)) {
+        if (b.down) continue;
+        const dx = x - this.birdX(b), dy = y - b.y, dz = z - b.z;
+        const reach = BIRD_R + radius;
+        if (dx * dx + dy * dy + dz * dz < reach * reach) return b;
+      }
+    }
+    return null;
+  }
+
+  // Idle life: penguins waddle on the spot and flap now and then; bears look around.
+  animate(dt) {
+    const t = (this.clock += dt);
+    for (const list of this.penguins.values()) {
+      for (const p of list) {
+        if (p.down || !p.mesh) continue;
+        const { body, flippers } = p.mesh.userData;
+        const w = t * 3.2 + p.phase;
+        body.rotation.z = Math.sin(w) * 0.09;
+        body.position.y = Math.abs(Math.cos(w)) * 0.03;
+        const ud = p.mesh.userData;
+        if (ud.indignant > 0) ud.indignant -= dt; // just got bumped: flap furiously
+        const flap = ud.indignant > 0 ? 1 : Math.max(0, Math.sin(t * 0.9 + p.phase * 1.7) - 0.85) * 4; // occasional excited flap
+        for (const f of flippers) f.rotation.z = f.userData.side * (0.25 + flap * Math.abs(Math.sin(t * 18)));
+      }
+    }
+    for (const list of this.birds.values()) {
+      for (const b of list) {
+        if (b.down || !b.mesh) continue;
+        b.mesh.position.set(this.birdX(b), b.y + Math.sin(t * 1.3 + b.flap) * 0.25, b.z);
+        // flap in bursts, then glide with wings held slightly up
+        const burst = Math.sin(t * 0.8 + b.flap) > -0.2;
+        const a = burst ? Math.sin(t * 14 + b.flap) * 0.6 : 0.12;
+        for (const w of b.mesh.userData.wings) w.rotation.z = w.userData.side * a;
+      }
+    }
+    for (const list of this.obstacles.values()) {
+      for (const o of list) {
+        if (o.type !== 'bear' || !o.mesh) continue;
+        const ud = o.mesh.userData;
+        const head = ud.head;
+        if (ud.startled > 0) {
+          // glare at whoever just ran into it
+          ud.startled -= dt;
+          const look = Math.max(-1.2, Math.min(1.2, Math.atan2(Math.sin(ud.lookAt), Math.cos(ud.lookAt))));
+          head.rotation.y += (look - head.rotation.y) * Math.min(1, dt * 12);
+          head.rotation.x += (-0.15 - head.rotation.x) * Math.min(1, dt * 12);
+          continue;
+        }
+        const idleY = Math.sin(t * 0.45 + o.x) * 0.45;
+        const idleX = 0.12 + Math.sin(t * 0.7 + o.z) * 0.1;
+        head.rotation.y += (idleY - head.rotation.y) * Math.min(1, dt * 2);
+        head.rotation.x += (idleX - head.rotation.x) * Math.min(1, dt * 2);
+      }
+    }
+  }
+
+  // Fit the bear to the snow under its four paws: tilt it along and across its body to match
+  // the slope, at the paws' average height, so no paw sinks in or hangs in the air.
+  standOnPaws(o) {
+    const sin = Math.sin(o.rot), cos = Math.cos(o.rot);
+    const h = BEAR_PAWS.map(([px, pz]) => {
+      const x = o.x + (px * cos + pz * sin) * o.scale;
+      const z = o.z + (-px * sin + pz * cos) * o.scale;
+      return this.meshHeight(x, z);
+    });
+    const [backL, backR, frontL, frontR] = h;
+    const len = (BEAR_PAWS[2][1] - BEAR_PAWS[0][1]) * o.scale;
+    const width = (BEAR_PAWS[1][0] - BEAR_PAWS[0][0]) * o.scale;
+    const pitch = Math.atan2((frontL + frontR - backL - backR) / 2, len); // nose up when the front is higher
+    const roll = Math.atan2((backR + frontR - backL - frontL) / 2, width); // +x side up when it is higher
+    o.mesh.rotation.order = 'YXZ';
+    o.mesh.rotation.set(-pitch, o.rot, roll);
+    o.mesh.position.set(o.x, (backL + backR + frontL + frontR) / 4 + 0.03, o.z); // paw pads just touching
+  }
+
+  // True when a circle of this radius is partly on an ice patch and partly on snow.
+  onIceEdge(x, z, radius) {
+    const centre = this.isIce(x, z);
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      if (this.isIce(x + Math.cos(a) * radius, z + Math.sin(a) * radius) !== centre) return true;
+    }
+    return false;
+  }
+
+  // Penguins stand upright, but each foot lies flat on the slope at the height of the snow
+  // under it, so none sinks in or hangs in the air.
+  plantPenguin(p) {
+    const e = 0.3;
+    const hx = (this.meshHeight(p.x + e, p.z) - this.meshHeight(p.x - e, p.z)) / (2 * e);
+    const hz = (this.meshHeight(p.x, p.z + e) - this.meshHeight(p.x, p.z - e)) / (2 * e);
+    const sin = Math.sin(p.rot), cos = Math.cos(p.rot);
+    const slopeX = hx * cos - hz * sin; // rise per metre along the penguin's own x and z
+    const slopeZ = hx * sin + hz * cos;
+    const ice = this.isIce(p.x, p.z) ? 0.05 : 0; // the ice sheet sits this far above the snow
+    p.mesh.position.set(p.x, this.meshHeight(p.x, p.z) + ice, p.z);
+    for (const foot of p.mesh.userData.feet) {
+      foot.position.y = PENGUIN_FOOT_Y + slopeX * foot.position.x + slopeZ * foot.position.z;
+      foot.rotation.set(-Math.atan(slopeZ), 0, Math.atan(slopeX));
+    }
   }
 
   // ---------- ice ----------
@@ -530,7 +995,7 @@ export class Terrain {
         this.chunks.delete(ci);
       }
     }
-    for (const cache of [this.icePatches, this.ramps, this.pads, this.snowmen, this.obstacles]) {
+    for (const cache of [this.icePatches, this.ramps, this.pads, this.snowmen, this.obstacles, this.penguins, this.birds]) {
       for (const ci of cache.keys()) {
         if (ci < minCi - 2) cache.delete(ci);
       }
@@ -544,11 +1009,12 @@ export class Terrain {
     const rand = mulberry32((this.seed ^ Math.imul(ci + 7, 0x85ebca6b)) >>> 0);
 
     // terrain mesh, flat-shaded with per-face colours
-    const plane = new THREE.PlaneGeometry(MESH_HALF * 2, CHUNK_LEN, SEG_X, SEG_Z);
+    const segs = SEG_X + OUTER_SEG * 2;
+    const plane = new THREE.PlaneGeometry(segs, CHUNK_LEN, segs, SEG_Z);
     plane.rotateX(-Math.PI / 2);
     const pp = plane.attributes.position;
     for (let i = 0; i < pp.count; i++) {
-      const x = pp.getX(i);
+      const x = COLUMN_X[Math.round(pp.getX(i) + segs / 2)];
       const z = pp.getZ(i) + z0 + CHUNK_LEN / 2;
       pp.setXYZ(i, x, this.baseHeight(x, z), z);
     }
@@ -607,8 +1073,15 @@ export class Terrain {
       group.add(sm.mesh);
     }
 
-    // lane trees and igloos, sat on the lowest ground under their footprint so no edge floats
+    // lane trees and igloos, sat on the lowest ground under their footprint so no edge floats;
+    // bears stand on their paws instead, leaning with the slope
     for (const o of this.obstaclesFor(ci)) {
+      if (o.type === 'bear') {
+        o.mesh = buildBear(o.scale);
+        this.standOnPaws(o);
+        group.add(o.mesh);
+        continue;
+      }
       o.mesh = o.type === 'tree' ? buildLaneTree(o.scale) : buildIgloo(o.scale);
       let floor = this.meshHeight(o.x, o.z);
       for (let k = 0; k < 8; k++) {
@@ -616,13 +1089,32 @@ export class Terrain {
         floor = Math.min(floor, this.meshHeight(o.x + Math.cos(a) * o.foot * 0.8, o.z + Math.sin(a) * o.foot * 0.8));
       }
       o.mesh.position.set(o.x, floor - 0.1, o.z);
-      if (o.type === 'igloo') o.mesh.rotation.y = o.rot;
+      if (o.type !== 'tree') o.mesh.rotation.y = o.rot;
       else o.mesh.rotation.y = rand() * Math.PI * 2;
       group.add(o.mesh);
     }
 
-    // trees on the banks
-    const treeCount = 34;
+    // penguins
+    for (const p of this.penguinsFor(ci)) {
+      if (p.down) continue;
+      p.mesh = buildPenguin(p.scale);
+      p.mesh.rotation.y = p.rot;
+      this.plantPenguin(p);
+      group.add(p.mesh);
+    }
+
+    // birds
+    for (const b of this.birdsFor(ci)) {
+      if (b.down) continue;
+      b.mesh = buildBird();
+      b.mesh.rotation.y = b.dir * Math.PI / 2;
+      b.mesh.position.set(this.birdX(b), b.y, b.z);
+      group.add(b.mesh);
+    }
+
+    // trees on the banks, then scattered stands out on the far hills
+    const BANK_TREES = 34;
+    const treeCount = BANK_TREES + 24;
     const lows = new THREE.InstancedMesh(treeLowGeo, treeMat, treeCount);
     const highs = new THREE.InstancedMesh(treeHighGeo, treeTopMat, treeCount);
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
@@ -632,9 +1124,10 @@ export class Terrain {
     const p = new THREE.Vector3();
     for (let i = 0; i < treeCount; i++) {
       const side = i % 2 ? 1 : -1;
-      const x = side * (TRACK_HALF + 5 + rand() * 45);
+      const bank = i < BANK_TREES;
+      const x = side * (bank ? TRACK_HALF + 5 + rand() * 45 : MESH_HALF + 6 + rand() * 260);
       const z = z0 + rand() * CHUNK_LEN;
-      const sc = 0.7 + rand() * 0.8;
+      const sc = bank ? 0.7 + rand() * 0.8 : 1.2 + rand() * 1.2;
       p.set(x, this.height(x, z) - 0.3, z);
       q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rand() * Math.PI);
       s.set(sc, sc * (0.9 + rand() * 0.3), sc);
@@ -657,7 +1150,7 @@ export class Terrain {
         const z = z0 + k * 20;
         for (const side of [-1, 1]) {
           const x = side * (TRACK_HALF + 0.5);
-          m.makeTranslation(x, this.height(x, z), z);
+          m.makeTranslation(x, this.meshHeight(x, z) - 0.08, z);
           gates.setMatrixAt(g++, m);
         }
       }
@@ -681,7 +1174,8 @@ export class Terrain {
     // coin patterns
     const coins = [];
     const addCoin = (x, y, z) => {
-      if (this.obstacleAt(x, z, 0.6, y - this.height(x, z))) return; // no coins buried in trees or igloos
+      const above = y - this.height(x, z);
+      if (this.obstacleAt(x, z, 0.6, above) || this.penguinAt(x, z, 0.4, above)) return; // no coins buried in hazards
       const mesh = new THREE.Mesh(coinGeo, coinMat);
       mesh.position.set(x, y, z);
       mesh.castShadow = true;
@@ -707,10 +1201,12 @@ export class Terrain {
       ramp.receiveShadow = true;
       group.add(ramp);
       disposables.push(geo);
+      // lip markers just outside the ramp mesh, planted in the rendered snow (the coarse
+      // ramp mesh doesn't follow height() exactly at its edges, so poles on it could float)
       for (const side of [-1, 1]) {
-        const x = r.x + side * (r.w / 2 + 0.3);
+        const x = r.x + side * (r.w / 2 + 1.25);
         const pole = new THREE.Mesh(gateGeo, gateMat);
-        pole.position.set(x, this.height(x, r.lip), r.lip);
+        pole.position.set(x, this.meshHeight(x, r.lip) - 0.08, r.lip);
         group.add(pole);
       }
       for (let j = 0; j < 7; j++) {
@@ -743,8 +1239,29 @@ export class Terrain {
       }
     }
 
+    // the odd gas can, only for sleds that carry a rocket
+    const cans = [];
+    if (this.fuelCans && ci >= CAN_START_CHUNK) {
+      const r = mulberry32((this.seed ^ Math.imul(ci + 17, 0x31848bab)) >>> 0);
+      if (r() < CAN_CHANCE) {
+        for (let attempt = 0; attempt < 10; attempt++) {
+          const x = (r() * 2 - 1) * (TRACK_HALF - 5);
+          const z = ci * CHUNK_LEN + 10 + r() * (CHUNK_LEN - 20);
+          const g = this.height(x, z);
+          if (this.obstacleAt(x, z, 2, 0) || this.penguinAt(x, z, 2, 0) || this.snowmanAt(x, z, 2)) continue;
+          const mesh = buildCan();
+          mesh.position.set(x, g + 1.3, z);
+          const glow = new THREE.Mesh(canGlowGeo, canGlowMat);
+          glow.position.set(x, this.meshHeight(x, z) + 0.06, z);
+          group.add(mesh, glow);
+          cans.push({ mesh, glow, baseY: g + 1.3, collected: false });
+          break;
+        }
+      }
+    }
+
     this.scene.add(group);
-    return { ci, group, coins, disposables };
+    return { ci, group, coins, cans, disposables };
   }
 
   iceGeometry(p, rand) {
@@ -798,6 +1315,8 @@ export class Terrain {
     this.pads.clear();
     this.snowmen.clear();
     this.obstacles.clear();
+    this.penguins.clear();
+    this.birds.clear();
   }
 }
 

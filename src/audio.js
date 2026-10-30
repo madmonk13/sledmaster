@@ -343,6 +343,53 @@ export class Sfx {
     }
   }
 
+  // Bowling a penguin over: a soft thump and an outraged two-note honk.
+  squawk(knocked) {
+    if (!this.ready) return;
+    if (knocked) {
+      this.tone(120, { dur: 0.18, vol: 0.3, slideTo: 60 });
+      this.burst({ type: 'lowpass', freq: 900, q: 0.7, dur: 0.2, vol: 0.2 });
+    }
+    const base = 520 + Math.random() * 120;
+    [0, 0.13].forEach((at, i) => {
+      const f = base * (i ? 0.84 : 1);
+      this.tone(f, { type: 'square', at, dur: 0.11, vol: 0.05, slideTo: f * 1.35, attack: 0.01 });
+      this.tone(f * 0.5, { type: 'sawtooth', at, dur: 0.11, vol: 0.04, slideTo: f * 0.62, attack: 0.01 });
+    });
+  }
+
+  // A disgruntled polar bear: a low, rough growl over the impact.
+  growl(severity) {
+    if (!this.ready) return;
+    const k = 0.4 + 0.6 * severity;
+    for (let i = 0; i < 5; i++) {
+      const f = 68 + Math.random() * 14;
+      this.tone(f, { type: 'sawtooth', at: 0.08 + i * 0.1, dur: 0.16, vol: 0.09 * k, slideTo: f * 0.85, attack: 0.03 });
+    }
+    this.burst({ type: 'lowpass', freq: 320, q: 3, at: 0.08, dur: 0.6, vol: 0.3 * k, attack: 0.08 });
+  }
+
+  // Bird strike: a feathery whoosh and an indignant gull cry.
+  birdHit(knocked) {
+    if (!this.ready) return;
+    this.burst({ type: 'highpass', freq: 1800, slideTo: 900, q: 0.6, dur: 0.35, vol: 0.18 });
+    if (!knocked) this.tone(110, { dur: 0.2, vol: 0.3, slideTo: 60 });
+    const f = 1500 + Math.random() * 300;
+    this.tone(f, { type: 'sawtooth', at: 0.06, dur: 0.22, vol: 0.035, slideTo: f * 0.6, attack: 0.02 });
+    this.tone(f * 1.1, { type: 'square', at: 0.3, dur: 0.16, vol: 0.025, slideTo: f * 0.7, attack: 0.02 });
+  }
+
+  // Gas can: a quick glug-glug and a rising two-note ding.
+  refuel() {
+    if (!this.ready) return;
+    for (let i = 0; i < 3; i++) {
+      this.tone(180 + i * 40, { type: 'triangle', at: i * 0.07, dur: 0.08, vol: 0.18, slideTo: 320 + i * 60 });
+      this.burst({ type: 'lowpass', freq: 500, q: 2, at: i * 0.07, dur: 0.06, vol: 0.12 });
+    }
+    this.tone(988, { type: 'triangle', at: 0.22, dur: 0.18, vol: 0.12 });
+    this.tone(1319, { type: 'triangle', at: 0.32, dur: 0.35, vol: 0.12 });
+  }
+
   click() {
     if (!this.ready) return;
     this.tone(900, { type: 'triangle', dur: 0.05, vol: 0.06, slideTo: 600 });

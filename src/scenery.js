@@ -1,25 +1,7 @@
-// Sky, distant mountains and the snow spray thrown up by the runners.
+// Distant mountains, clouds and the snow spray thrown up by the runners.
 
 import * as THREE from 'three';
 import { mulberry32 } from './rng.js';
-
-export const HORIZON = 0xd4ecff;
-
-export function makeSky() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 2;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d');
-  const grad = ctx.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#5aa9e6');
-  grad.addColorStop(0.55, '#a9d6fa');
-  grad.addColorStop(1, '#d4ecff');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 2, 256);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
 
 const ROCK = new THREE.Color(0x8fa6bf);
 const SNOW = new THREE.Color(0xffffff);
@@ -170,6 +152,11 @@ export class Clouds {
       this.group.add(sprite);
     }
     scene.add(this.group);
+  }
+
+  // Multiplies every cloud's colour, for sunsets and moonlit nights.
+  setTint(color) {
+    for (const c of this.clouds) c.sprite.material.color.copy(color);
   }
 
   update(dt, camera) {

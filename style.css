@@ -99,6 +99,12 @@ html, body {
   padding: 4px 10px;
   border-radius: 999px;
 }
+#fuel-wrap.refuel { animation: refuel 0.8s ease-out; }
+@keyframes refuel {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 210, 80, 0.9); }
+  30% { transform: scale(1.12); box-shadow: 0 0 0 8px rgba(255, 210, 80, 0.5); }
+  100% { transform: scale(1); box-shadow: 0 0 0 16px rgba(255, 210, 80, 0); }
+}
 #fuel-wrap .bar {
   width: 140px;
   height: 8px;

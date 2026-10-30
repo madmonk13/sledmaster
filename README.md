@@ -31,7 +31,8 @@ If you add a file under `src/`, add it to `SHELL` in `sw.js` and bump `CACHE` so
 | `src/upgrades.js` | Upgrade and wing definitions, costs, `computeStats()` |
 | `src/ui.js` | HUD, results and workshop overlays |
 | `src/scenery.js` | Sky gradient, clouds, distant mountains, snow spray |
-| `src/effects.js` | Coin pickup animation and sparkles, snowman debris |
+| `src/effects.js` | Coin pickup animation and sparkles, hazard hit effects (snowman debris, tumbling penguins) |
+| `src/environment.js` | Day/night cycle (sky, fog, light and cloud colours, stars, moon) and falling snow |
 | `src/audio.js` | Synthesized sound effects (Web Audio), mute setting |
 | `src/save.js` | `localStorage` save/load |
 
@@ -43,7 +44,12 @@ If you add a file under `src/`, add it to `SHELL` in `sw.js` and bump `CACHE` so
 - Ramps: `rampsFor()` in `src/terrain.js`.
 - Booster pads: placement in `padsFor()` in `src/terrain.js`; strength `PAD_KICK`, `PAD_SURGE`, `PAD_ACCEL` in `src/physics.js`.
 - Snowmen: placement in `snowmenFor()` in `src/terrain.js`; `SHATTER_SPEED` (smash vs stop) and `SHATTER_KEEP` (speed kept) in `src/physics.js`.
-- Trees and igloos: placement in `obstaclesFor()` in `src/terrain.js`; `SCRAPE_LOSS` (speed scrubbed on a head-on hit) in `src/physics.js`.
+- Day/night and weather: `DAY_LENGTH` (seconds per full cycle), the colour keyframes in `KEYS`, the sun and moon path (`ARC_*`) and light angles (`LIGHT_ELEV_*`), flake counts and size, and shower timing in `updateWeather()`, all in `src/environment.js`.
+- Gas cans: `CAN_CHANCE` (per 100 m) in `src/terrain.js`; `CAN_REFILL` (share of a tank) in `src/main.js`.
+- Terrain width: `OUTER_HALF` and `OUTER_SEG` in `src/terrain.js` (how far the far hills reach, and how many columns they use).
+- Birds: flocks in `birdsFor()` in `src/terrain.js`; `STALL_TIME` and `STALL_DEPTH` (lift lost after a strike) in `src/physics.js`; speed loss shares `KNOCK_SPEED`/`KNOCK_KEEP` with penguins.
+- Penguins: placement in `penguinsFor()` in `src/terrain.js`; `KNOCK_SPEED` (bowl over vs stop) and `KNOCK_KEEP` (speed kept) in `src/physics.js`.
+- Trees, igloos and polar bears: placement in `obstaclesFor()` in `src/terrain.js`; `SCRAPE_LOSS` (speed scrubbed on a head-on hit) in `src/physics.js`.
 
 `tools/balance.js` simulates full-power runs across seeds and upgrade levels with a simple driver bot. To use it, open the game and run this in the browser console:
 

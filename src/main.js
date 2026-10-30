@@ -4,10 +4,11 @@ import { Terrain, CHUNK_LEN, TRACK_HALF, animatePads, setIglooModel } from './te
 import { buildSled } from './sled.js';
 import { SledBody, SHATTER_KEEP } from './physics.js';
 import { Input } from './input.js';
-import { UI } from './ui.js';
+import { UI, MPH } from './ui.js';
 import { computeStats, upgradeCost, levelOf } from './upgrades.js';
 import { loadSave, writeSave, clearSave, defaultSave } from './save.js';
-import { makeSky, Mountains, Clouds, Spray, HORIZON } from './scenery.js';
+import { Mountains, Clouds, Spray } from './scenery.js';
+import { Environment } from './environment.js';
 import { CoinFx, HazardFx } from './effects.js';
 import { Sfx } from './audio.js';
 
@@ -15,6 +16,8 @@ const STEP = 1 / 120;
 const MAX_AIM = 0.45;
 const PULL_DIST = 6;
 const UP = new THREE.Vector3(0, 1, 0);
+const CAN_PICK_R = 2.2;
+const CAN_REFILL = 0.5; // share of a full tank per gas can
 
 // ---------- renderer & scene ----------
 const canvas = document.getElementById('game');
@@ -24,22 +27,22 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
-scene.background = makeSky();
-scene.fog = new THREE.Fog(HORIZON, 90, 520);
 
 const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 2500);
 
-scene.add(new THREE.HemisphereLight(0xe2f2ff, 0xb4c6da, 1.7));
+const hemi = new THREE.HemisphereLight(0xe2f2ff, 0xb4c6da, 1.7);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff3dd, 2.0);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -35, right: 35, top: 35, bottom: -35, near: 1, far: 220 });
 sun.shadow.bias = -0.0005;
 scene.add(sun, sun.target);
-const SUN_OFFSET = new THREE.Vector3(-40, 80, -30);
+const SUN_DIST = 100; // how far up the light's direction the shadow-casting light sits
 
 const mountains = new Mountains(scene);
 const clouds = new Clouds(scene);
+const env = new Environment(scene, { hemi, sun, clouds });
 const spray = new Spray(scene);
 const coinFx = new CoinFx(scene);
 const hazardFx = new HazardFx(scene, () => terrain);
@@ -220,7 +223,7 @@ function afterPurchase() {
 
 function newCourse() {
   if (terrain) terrain.dispose();
-  terrain = new Terrain(scene, (Math.random() * 4294967296) >>> 0);
+  terrain = new Terrain(scene, (Math.random() * 4294967296) >>> 0, { fuelCans: stats.fuel > 0 });
   terrain.update(0);
   body.reset();
   spray.clear();
@@ -231,8 +234,8 @@ function newCourse() {
 }
 
 function startCourse() {
+  stats = computeStats(save); // before the course, which only places gas cans if you own a rocket
   newCourse();
-  stats = computeStats(save);
   sled.setLoadout(stats);
   mode = 'aim';
   Object.assign(aimState, { pull: 0, aim: 0, keyPull: 0, keyAim: 0 });
@@ -253,7 +256,6 @@ function launch() {
   setBands(REST_POCKET);
   ui.resetHud();
   ui.setMode('run', stats);
-  ui.toast('Wheee!');
   sfx.launch(aimState.pull);
 }
 
@@ -354,7 +356,7 @@ function updateRun(dt) {
       hazardFx.smash(hit);
       sfx.smash(hit.speed);
       shake = Math.max(shake, 0.3);
-      ui.toast(`Smash! −${Math.round(hit.speed * (1 - SHATTER_KEEP) * 3.6)} km/h`);
+      ui.toast(`Smash! −${Math.round(hit.speed * (1 - SHATTER_KEEP) * MPH)} mph`);
     } else {
       hazardFx.bonk(hit);
       sfx.bonk();
@@ -365,12 +367,32 @@ function updateRun(dt) {
   body.snowmanHits.length = 0;
   for (const hit of body.obstacleHits) {
     hazardFx.obstacle(hit);
-    sfx.thud(hit.obstacle.type, hit.severity);
+    sfx.thud(hit.obstacle.type === 'tree' ? 'tree' : 'snow', hit.severity);
+    if (hit.obstacle.type === 'bear') sfx.growl(hit.severity);
     shake = Math.max(shake, 0.12 + 0.4 * hit.severity);
-    if (hit.severity > 0.6) ui.toast(hit.obstacle.type === 'tree' ? 'Thwack!' : 'Whump!');
-    else if (hit.severity > 0.2) ui.toast('Glancing blow');
+    if (hit.severity > 0.6) ui.toast({ tree: 'Thwack!', igloo: 'Whump!', bear: 'Oof!' }[hit.obstacle.type]);
   }
   body.obstacleHits.length = 0;
+  for (const hit of body.penguinHits) {
+    sfx.squawk(hit.kind === 'knock');
+    ui.toast('Sorry!');
+    if (hit.kind === 'knock') {
+      hazardFx.knock(hit);
+      shake = Math.max(shake, 0.15);
+    } else {
+      hazardFx.penguinBonk(hit);
+      shake = Math.max(shake, 0.35);
+    }
+  }
+  body.penguinHits.length = 0;
+  for (const hit of body.birdHits) {
+    const knocked = hit.kind === 'knock';
+    hazardFx.birdHit(hit);
+    sfx.birdHit(knocked);
+    shake = Math.max(shake, knocked ? 0.15 : 0.35);
+    ui.toast('Bonk!');
+  }
+  body.birdHits.length = 0;
 
   run.time += dt;
   if (body.pos.z > run.maxZ + 0.25) {
@@ -383,6 +405,7 @@ function updateRun(dt) {
   run.still = slow ? run.still + dt : 0;
 
   collectCoins(dt);
+  collectCans(dt);
   terrain.update(body.pos.z);
   spray.emit(body, dt);
   ui.updateHud(run, body, stats, save.best);
@@ -397,11 +420,11 @@ function onLanding({ impact, airTime }) {
     const bonus = Math.floor((airTime - 1) * 3);
     run.air += bonus;
     sfx.chime();
-    ui.toast(impact > 12 ? `Oof! Air +${bonus}` : `Airtime +${bonus}`);
+    ui.toast(impact > 12 ? `Hangtime! +${bonus}` : `Airtime +${bonus}`);
   } else if (impact > 12) {
     ui.toast('Oof!');
   } else if (airTime > 0.8) {
-    ui.toast('Smooth landing');
+    ui.toast('Nice Landing!');
   }
 }
 
@@ -436,6 +459,33 @@ function collectCoins(dt) {
         coinFx.collect(m, body);
         sfx.coin();
         run.coins += coinValue(m.z);
+      }
+    }
+  }
+}
+
+// Gas cans bob and spin; flying through one tops the tank up by half its size.
+function collectCans(dt) {
+  const ci = Math.floor(body.pos.z / CHUNK_LEN);
+  const sx = body.pos.x, sy = body.pos.y + 0.7, sz = body.pos.z;
+  for (const chunk of terrain.chunks.values()) {
+    for (const c of chunk.cans) {
+      if (c.collected) continue;
+      const m = c.mesh.position;
+      c.mesh.rotation.y += dt * 2;
+      m.y = c.baseY + Math.sin(time * 2.5 + m.z) * 0.2;
+      c.glow.material.opacity = 0.6 + 0.4 * Math.sin(time * 5);
+      if (Math.abs(chunk.ci - ci) > 1) continue;
+      const dx = sx - m.x, dy = sy - m.y, dz = sz - m.z;
+      if (dx * dx + dy * dy + dz * dz < CAN_PICK_R * CAN_PICK_R) {
+        c.collected = true;
+        c.mesh.visible = false;
+        c.glow.visible = false;
+        const before = body.fuel;
+        body.fuel = Math.min(stats.fuel, body.fuel + stats.fuel * CAN_REFILL);
+        sfx.refuel();
+        ui.refuel();
+        ui.toast(body.fuel > before + 0.01 ? `Fuel +${Math.round(((body.fuel - before) / stats.fuel) * 100)}%` : 'Tank already full');
       }
     }
   }
@@ -537,10 +587,11 @@ function updateCamera(dt, snap = false) {
     camera.updateProjectionMatrix();
   }
 
-  sun.position.copy(p).add(SUN_OFFSET);
+  sun.position.copy(p).addScaledVector(env.lightDir, SUN_DIST);
   sun.target.position.copy(p);
   mountains.follow(camera);
   clouds.update(dt, camera);
+  env.update(dt, camera, renderer);
 }
 
 // ---------- loop ----------
@@ -567,6 +618,7 @@ function frame(now) {
     onIce: body.onIce, airborne: body.airborne, boosting: body.boosting,
   });
   animatePads(dt);
+  terrain.animate(dt);
   coinFx.update(dt, body);
   hazardFx.update(dt);
   updateSledVisual(dt);
@@ -588,4 +640,4 @@ ui.showMenu(save);
 requestAnimationFrame(frame);
 
 // handy for debugging from the console
-window.__sledmaster = { body, get mode() { return mode; }, get terrain() { return terrain; }, get save() { return save; }, get stats() { return stats; }, coinFx, sfx };
+window.__sledmaster = { body, get mode() { return mode; }, get terrain() { return terrain; }, get save() { return save; }, get stats() { return stats; }, coinFx, sfx, env };

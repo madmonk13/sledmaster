@@ -3,12 +3,12 @@
 // falling back to the cached copy. Three.js and the font come from CDNs and are
 // cache-first, since those URLs never change.
 
-const CACHE = 'sledmaster-v3';
+const CACHE = 'sledmaster-v14';
 const SHELL = [
   './', 'index.html', 'style.css', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png',
   'src/main.js', 'src/terrain.js', 'src/physics.js', 'src/sled.js', 'src/upgrades.js', 'src/ui.js',
-  'src/scenery.js', 'src/save.js', 'src/rng.js', 'src/input.js', 'src/effects.js', 'src/audio.js',
+  'src/scenery.js', 'src/save.js', 'src/rng.js', 'src/input.js', 'src/effects.js', 'src/audio.js', 'src/environment.js',
   'models/igloo.glb',
 ];
 const CDN = [
