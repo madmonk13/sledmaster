@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { Terrain, CHUNK_LEN, TRACK_HALF, animatePads } from './terrain.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { Terrain, CHUNK_LEN, TRACK_HALF, animatePads, setIglooModel } from './terrain.js';
 import { buildSled } from './sled.js';
 import { SledBody, SHATTER_KEEP } from './physics.js';
 import { Input } from './input.js';
@@ -7,7 +8,7 @@ import { UI } from './ui.js';
 import { computeStats, upgradeCost, levelOf } from './upgrades.js';
 import { loadSave, writeSave, clearSave, defaultSave } from './save.js';
 import { makeSky, Mountains, Clouds, Spray, HORIZON } from './scenery.js';
-import { CoinFx, SnowmanFx } from './effects.js';
+import { CoinFx, HazardFx } from './effects.js';
 import { Sfx } from './audio.js';
 
 const STEP = 1 / 120;
@@ -41,7 +42,7 @@ const mountains = new Mountains(scene);
 const clouds = new Clouds(scene);
 const spray = new Spray(scene);
 const coinFx = new CoinFx(scene);
-const snowFx = new SnowmanFx(scene, () => terrain);
+const hazardFx = new HazardFx(scene, () => terrain);
 const sfx = new Sfx();
 
 // ---------- slingshot ----------
@@ -350,18 +351,26 @@ function updateRun(dt) {
   }
   for (const hit of body.snowmanHits) {
     if (hit.kind === 'smash') {
-      snowFx.smash(hit);
+      hazardFx.smash(hit);
       sfx.smash(hit.speed);
       shake = Math.max(shake, 0.3);
       ui.toast(`Smash! −${Math.round(hit.speed * (1 - SHATTER_KEEP) * 3.6)} km/h`);
     } else {
-      snowFx.bonk(hit);
+      hazardFx.bonk(hit);
       sfx.bonk();
       shake = Math.max(shake, 0.45);
       ui.toast('Bonk!');
     }
   }
   body.snowmanHits.length = 0;
+  for (const hit of body.obstacleHits) {
+    hazardFx.obstacle(hit);
+    sfx.thud(hit.obstacle.type, hit.severity);
+    shake = Math.max(shake, 0.12 + 0.4 * hit.severity);
+    if (hit.severity > 0.6) ui.toast(hit.obstacle.type === 'tree' ? 'Thwack!' : 'Whump!');
+    else if (hit.severity > 0.2) ui.toast('Glancing blow');
+  }
+  body.obstacleHits.length = 0;
 
   run.time += dt;
   if (body.pos.z > run.maxZ + 0.25) {
@@ -559,11 +568,19 @@ function frame(now) {
   });
   animatePads(dt);
   coinFx.update(dt, body);
-  snowFx.update(dt);
+  hazardFx.update(dt);
   updateSledVisual(dt);
   updateCamera(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
+}
+
+// load the igloo model before building the first course; without it a plain dome stands in
+try {
+  const gltf = await new GLTFLoader().loadAsync('models/igloo.glb');
+  setIglooModel(gltf.scene);
+} catch (e) {
+  console.warn('Igloo model failed to load; using a plain dome', e);
 }
 
 newCourse();

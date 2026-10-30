@@ -17,6 +17,9 @@ const PAD_ACCEL = 9;
 export const SHATTER_SPEED = 12; // m/s: at or above this a snowman bursts, below it the sled stops dead
 export const SHATTER_KEEP = 0.55; // share of speed kept after smashing through
 const SLED_R = 0.6;
+// Solid obstacles (trees, igloos): the into-obstacle part of the velocity is always lost, and the
+// part along the surface is scrubbed by up to this share on a head-on hit (less when glancing).
+const SCRAPE_LOSS = 0.6;
 
 const tmpN = new THREE.Vector3();
 
@@ -42,6 +45,8 @@ export class SledBody {
     this.padHits = 0; // pads hit since the game last read it
     this.snowmanHits = []; // { snowman, kind: 'smash' | 'bonk', speed, vel } since the game last read it
     this.lastSnowman = null;
+    this.obstacleHits = []; // { obstacle, severity 0..1 (1 = head-on), speed, x, z } since last read
+    this.lastObstacle = null;
     this.landing = null; // { impact, airTime } set on the step the sled lands
   }
 
@@ -104,6 +109,7 @@ export class SledBody {
 
     const ground = terrain.height(p.x, p.z);
     this.checkSnowman(terrain, ground);
+    this.checkObstacle(terrain, ground);
     const wasAirTime = this.airTime;
     if (p.y <= ground) {
       p.y = ground;
@@ -170,6 +176,43 @@ export class SledBody {
       v.x -= vin * nx;
       v.z -= vin * nz;
     }
+  }
+
+  // Trees and igloos never break. Hitting one head-on stops you almost dead; a glancing
+  // blow deflects you along its edge and keeps more speed the shallower the angle.
+  checkObstacle(terrain, ground) {
+    const p = this.pos, v = this.vel;
+    const hit = terrain.obstacleAt(p.x, p.z, SLED_R, p.y - ground);
+    if (!hit) {
+      this.lastObstacle = null;
+      return;
+    }
+    const c = hit.circle;
+    const dx = p.x - c.x, dz = p.z - c.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const nx = dx / d, nz = dz / d;
+    p.x = c.x + nx * (c.r + SLED_R);
+    p.z = c.z + nz * (c.r + SLED_R);
+    const vin = v.x * nx + v.z * nz;
+    if (vin >= 0) {
+      this.lastObstacle = hit.obstacle;
+      return;
+    }
+    const hSpeed = Math.hypot(v.x, v.z);
+    v.x -= vin * nx;
+    v.z -= vin * nz;
+    if (hit.obstacle !== this.lastObstacle) {
+      // new impact: severity is how square-on it was (cosine of the angle to the surface normal)
+      const severity = Math.min(1, -vin / Math.max(hSpeed, 1e-6));
+      const keep = 1 - SCRAPE_LOSS * severity;
+      v.x *= keep;
+      v.z *= keep;
+      this.surge = 0;
+      this.obstacleHits.push({ obstacle: hit.obstacle, severity, speed: hSpeed, x: p.x - nx * SLED_R, z: p.z - nz * SLED_R });
+      // glance off: swing the sled round to its new direction of travel
+      if (Math.hypot(v.x, v.z) > 3) this.facing = Math.atan2(v.x, v.z);
+    }
+    this.lastObstacle = hit.obstacle;
   }
 
   groundStep(dt, ctl, st, n) {

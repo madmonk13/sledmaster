@@ -282,6 +282,22 @@ export class Sfx {
     this.tone(260, { type: 'triangle', at: 0.05, dur: 0.45, vol: 0.12, slideTo: 140 });
   }
 
+  // Hitting a tree or igloo; severity 0..1 (1 = head-on) scales the impact.
+  thud(kind, severity) {
+    if (!this.ready) return;
+    const k = 0.35 + 0.65 * severity;
+    if (kind === 'tree') {
+      // woody thunk, then snow sliding off the branches
+      this.tone(150, { type: 'triangle', dur: 0.22, vol: 0.32 * k, slideTo: 70 });
+      this.burst({ freq: 420, q: 2, dur: 0.16, vol: 0.25 * k });
+      this.burst({ type: 'highpass', freq: 2500, q: 0.5, at: 0.08, dur: 0.6, vol: 0.06 + 0.08 * severity, attack: 0.08 });
+    } else {
+      // dull whump of packed snow
+      this.tone(70, { dur: 0.3, vol: 0.4 * k, slideTo: 35 });
+      this.burst({ type: 'lowpass', freq: 600, q: 0.7, dur: 0.35, vol: 0.35 * k });
+    }
+  }
+
   click() {
     if (!this.ready) return;
     this.tone(900, { type: 'triangle', dur: 0.05, vol: 0.06, slideTo: 600 });

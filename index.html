@@ -18,7 +18,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
   </script>
 </head>
 <body>
@@ -63,9 +68,11 @@
         <div><b>Boost:</b> hold Space or the 🚀 button (needs a rocket).</div>
         <div>Ice is slippery and fast. Wings let you glide off hills.</div>
         <div><b>Snowmen:</b> smash through them at speed, but hit one slowly and you stop dead.</div>
+        <div><b>Trees &amp; igloos:</b> solid. Hit square-on and you stop; clip the edge and you glance off.</div>
         <div><b>Sound:</b> M or the speaker button to mute.</div>
       </div>
       <button id="btn-reset" class="link-btn">Reset progress</button>
+      <div class="credits">Igloo model: “Igloo” by Poly by Google, CC-BY 3.0</div>
     </div>
   </div>
 

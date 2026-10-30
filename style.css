@@ -296,6 +296,7 @@ h2 { margin: 0; font-size: 26px; }
 }
 .btn:disabled { opacity: 0.45; cursor: default; }
 
+.credits { font-size: 11px; color: var(--ink-soft); text-align: center; opacity: 0.8; }
 .link-btn {
   font: inherit;
   font-size: 13px;

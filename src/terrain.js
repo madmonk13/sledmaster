@@ -22,6 +22,13 @@ export const PAD_LEN = 5;
 const SNOWMAN_START_CHUNK = 2;
 export const SNOWMAN_R = 0.75; // collision radius of the bottom ball
 export const SNOWMAN_H = 2.3; // clear this much air over the snow to jump a snowman
+const TREE_START_CHUNK = 2;
+const IGLOO_START_CHUNK = 3;
+// Igloo footprint in model units (models/igloo.glb, dome centred, entrance along +z):
+// the dome is a circle of radius 1 and the entrance tunnel reaches out to z = 1.3.
+const IGLOO_DOME_R = 1;
+const IGLOO_TUNNEL = { z: 1.12, r: 0.3 };
+const IGLOO_HEIGHT = 1.06;
 const CELL_X = (MESH_HALF * 2) / SEG_X;
 const CELL_Z = CHUNK_LEN / SEG_Z;
 
@@ -141,6 +148,60 @@ function buildSnowman(r) {
   return g;
 }
 
+// Lane trees: like the bank trees but with a taller trunk, so the lowest branches
+// clear the penguin and only the trunk and inner boughs (the collision circle) stop you.
+const laneTrunkGeo = new THREE.CylinderGeometry(0.28, 0.4, 2.2, 6).translate(0, 1.1, 0);
+const laneLowGeo = new THREE.ConeGeometry(1.9, 3.2, 7).translate(0, 3.3, 0);
+const laneMidGeo = new THREE.ConeGeometry(1.4, 2.6, 7).translate(0, 4.9, 0);
+const laneTopGeo = new THREE.ConeGeometry(0.85, 1.8, 7).translate(0, 6.4, 0);
+const laneSnowGeo = new THREE.ConeGeometry(0.5, 0.75, 7).translate(0, 7.0, 0);
+const treeSnowMat = new THREE.MeshLambertMaterial({ color: 0xf4f9ff, flatShading: true });
+const LANE_TREE_R = 0.9; // collision radius at scale 1
+const LANE_TREE_H = 7.3;
+
+function buildLaneTree(scale) {
+  const g = new THREE.Group();
+  for (const [geo, m] of [[laneTrunkGeo, trunkMat], [laneLowGeo, treeMat], [laneMidGeo, treeTopMat], [laneTopGeo, treeMat], [laneSnowGeo, treeSnowMat]]) {
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.castShadow = true;
+    g.add(mesh);
+  }
+  g.scale.setScalar(scale);
+  return g;
+}
+
+// The igloo comes from a glTF file loaded at startup (see main.js). Until it arrives,
+// or if it fails to load, a plain snow dome stands in.
+let iglooTemplate = null;
+export function setIglooModel(model) {
+  // re-centre so the dome sits at the origin with its base at y = 0
+  const box = new THREE.Box3().setFromObject(model);
+  const domeZ = box.min.z + IGLOO_DOME_R;
+  model.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -domeZ);
+  model.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+    }
+  });
+  iglooTemplate = new THREE.Group().add(model);
+}
+const fallbackDomeGeo = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+
+function buildIgloo(scale) {
+  let g;
+  if (iglooTemplate) g = iglooTemplate.clone();
+  else {
+    g = new THREE.Group();
+    const dome = new THREE.Mesh(fallbackDomeGeo, snowBodyMat);
+    dome.scale.set(1, IGLOO_HEIGHT, 1);
+    dome.castShadow = true;
+    g.add(dome);
+  }
+  g.scale.setScalar(scale);
+  return g;
+}
+
 export function animatePads(dt) {
   padTex.offset.y = (padTex.offset.y + dt * 2.2) % 1;
 }
@@ -159,6 +220,7 @@ export class Terrain {
     this.ramps = new Map();
     this.pads = new Map();
     this.snowmen = new Map();
+    this.obstacles = new Map();
   }
 
   // ---------- height field ----------
@@ -353,6 +415,74 @@ export class Terrain {
     return null;
   }
 
+  // ---------- solid obstacles: lane trees and igloos ----------
+
+  // Each obstacle is a few collision circles plus a height you can jump over.
+  // They keep clear of ramps (and landings), pads, snowmen and each other.
+  obstaclesFor(ci) {
+    let list = this.obstacles.get(ci);
+    if (list) return list;
+    list = [];
+    if (ci >= TREE_START_CHUNK) {
+      const r = mulberry32((this.seed ^ Math.imul(ci + 11, 0x7feb352d)) >>> 0);
+      const ramps = this.rampsFor(ci);
+      const pads = this.padsFor(ci);
+      const snowmen = this.snowmenFor(ci);
+      const fits = (x, z, foot) =>
+        !ramps.some((p) => Math.abs(x - p.x) < p.w / 2 + foot + 1 && z > p.lip - p.len - foot - 2 && z < p.lip + 16 + foot) &&
+        !pads.some((p) => Math.abs(x - p.x) < PAD_W / 2 + foot + 1 && z > p.z - foot - 6 && z < p.z + PAD_LEN + foot + 6) &&
+        !snowmen.some((s) => Math.hypot(x - s.x, z - s.z) < foot + 5) &&
+        !list.some((o) => Math.hypot(x - o.x, z - o.z) < foot + o.foot + 4);
+      const place = (foot, halfWidth, make) => {
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const x = (r() * 2 - 1) * halfWidth;
+          const z = ci * CHUNK_LEN + 5 + foot + r() * (CHUNK_LEN - 10 - foot * 2);
+          if (fits(x, z, foot)) {
+            list.push(make(x, z));
+            return;
+          }
+        }
+      };
+
+      const trees = Math.floor(r() * (1.4 + Math.min(1.8, ci * 0.05)));
+      for (let i = 0; i < trees; i++) {
+        const scale = 0.85 + r() * 0.3;
+        place(1.9 * scale, TRACK_HALF - 3, (x, z) => ({
+          type: 'tree', x, z, scale, foot: 1.9 * scale, h: LANE_TREE_H * scale,
+          circles: [{ x, z, r: LANE_TREE_R * scale }], mesh: null,
+        }));
+      }
+      const igloos = ci >= IGLOO_START_CHUNK ? (r() < 0.35 ? 1 : 0) + (ci > 10 && r() < 0.15 ? 1 : 0) : 0;
+      for (let i = 0; i < igloos; i++) {
+        const scale = 2.4 + r() * 0.4;
+        const rot = r() * Math.PI * 2;
+        place(1.35 * scale, TRACK_HALF - 6, (x, z) => ({
+          type: 'igloo', x, z, scale, rot, foot: 1.35 * scale, h: IGLOO_HEIGHT * scale,
+          circles: [
+            { x, z, r: IGLOO_DOME_R * scale },
+            { x: x + Math.sin(rot) * IGLOO_TUNNEL.z * scale, z: z + Math.cos(rot) * IGLOO_TUNNEL.z * scale, r: IGLOO_TUNNEL.r * scale },
+          ],
+          mesh: null,
+        }));
+      }
+    }
+    this.obstacles.set(ci, list);
+    return list;
+  }
+
+  // First obstacle circle a sled of this radius overlaps, unless it is high enough to clear it.
+  obstacleAt(x, z, radius, heightAbove) {
+    for (const o of this.obstaclesFor(Math.floor(z / CHUNK_LEN))) {
+      if (heightAbove > o.h) continue;
+      for (const c of o.circles) {
+        const reach = c.r + radius;
+        const dx = x - c.x, dz = z - c.z;
+        if (dx * dx + dz * dz < reach * reach) return { obstacle: o, circle: c };
+      }
+    }
+    return null;
+  }
+
   // ---------- ice ----------
 
   patchesFor(ci) {
@@ -400,7 +530,7 @@ export class Terrain {
         this.chunks.delete(ci);
       }
     }
-    for (const cache of [this.icePatches, this.ramps, this.pads, this.snowmen]) {
+    for (const cache of [this.icePatches, this.ramps, this.pads, this.snowmen, this.obstacles]) {
       for (const ci of cache.keys()) {
         if (ci < minCi - 2) cache.delete(ci);
       }
@@ -477,6 +607,20 @@ export class Terrain {
       group.add(sm.mesh);
     }
 
+    // lane trees and igloos, sat on the lowest ground under their footprint so no edge floats
+    for (const o of this.obstaclesFor(ci)) {
+      o.mesh = o.type === 'tree' ? buildLaneTree(o.scale) : buildIgloo(o.scale);
+      let floor = this.meshHeight(o.x, o.z);
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        floor = Math.min(floor, this.meshHeight(o.x + Math.cos(a) * o.foot * 0.8, o.z + Math.sin(a) * o.foot * 0.8));
+      }
+      o.mesh.position.set(o.x, floor - 0.1, o.z);
+      if (o.type === 'igloo') o.mesh.rotation.y = o.rot;
+      else o.mesh.rotation.y = rand() * Math.PI * 2;
+      group.add(o.mesh);
+    }
+
     // trees on the banks
     const treeCount = 34;
     const lows = new THREE.InstancedMesh(treeLowGeo, treeMat, treeCount);
@@ -537,6 +681,7 @@ export class Terrain {
     // coin patterns
     const coins = [];
     const addCoin = (x, y, z) => {
+      if (this.obstacleAt(x, z, 0.6, y - this.height(x, z))) return; // no coins buried in trees or igloos
       const mesh = new THREE.Mesh(coinGeo, coinMat);
       mesh.position.set(x, y, z);
       mesh.castShadow = true;
@@ -652,6 +797,7 @@ export class Terrain {
     this.ramps.clear();
     this.pads.clear();
     this.snowmen.clear();
+    this.obstacles.clear();
   }
 }
 

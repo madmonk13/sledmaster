@@ -132,15 +132,16 @@ export class CoinFx {
   }
 }
 
-// Snowman hits: a smash bursts it into tumbling chunks of snow (plus the carrot and
-// coal) that bounce on the slope; a slow bonk just makes it wobble.
+// Hazard hits. A snowman smash bursts it into tumbling chunks of snow (plus the carrot
+// and coal) that bounce on the slope, and a slow bonk makes it wobble. Trees sway and
+// shed snow from their branches; igloos throw up a puff of packed snow.
 const DEBRIS = 72;
 const DEBRIS_LIFE = 1.6;
 const chunkGeo = new THREE.IcosahedronGeometry(1, 0);
 const debrisSnowMat = snowBodyMat.clone();
 debrisSnowMat.flatShading = true;
 
-export class SnowmanFx {
+export class HazardFx {
   constructor(scene, terrainRef) {
     this.terrainRef = terrainRef; // () => current terrain, for bouncing off the snow
     this.pieces = [];
@@ -203,7 +204,40 @@ export class SnowmanFx {
   }
 
   bonk(hit) {
-    if (hit.snowman.mesh) this.wobbles.push({ mesh: hit.snowman.mesh, t: 0, base: hit.snowman.mesh.rotation.z });
+    if (hit.snowman.mesh) this.wobble(hit.snowman.mesh, 0.16);
+  }
+
+  wobble(mesh, amp) {
+    if (this.wobbles.some((w) => w.mesh === mesh)) return;
+    this.wobbles.push({ mesh, t: 0, amp, baseX: mesh.rotation.x, baseZ: mesh.rotation.z });
+  }
+
+  // hit: { obstacle, severity, x, z } from the physics
+  obstacle(hit) {
+    const o = hit.obstacle;
+    const terrain = this.terrainRef();
+    const pos = new THREE.Vector3();
+    const vel = new THREE.Vector3();
+    if (o.type === 'tree') {
+      if (o.mesh) this.wobble(o.mesh, 0.04 + 0.08 * hit.severity);
+      const base = o.mesh ? o.mesh.position.y : terrain.height(o.x, o.z);
+      const n = 6 + Math.round(10 * hit.severity);
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const rr = (0.6 + Math.random() * 1.1) * o.scale;
+        pos.set(o.x + Math.cos(a) * rr, base + (2.4 + Math.random() * 3.2) * o.scale, o.z + Math.sin(a) * rr);
+        vel.set(Math.cos(a) * Math.random() * 1.5, -Math.random() * 2, Math.sin(a) * Math.random() * 1.5);
+        this.spawn(chunkGeo, debrisSnowMat, 0.08 + Math.random() * 0.14, pos, vel);
+      }
+    } else {
+      const g = terrain ? terrain.height(hit.x, hit.z) : 0;
+      const n = 5 + Math.round(9 * hit.severity);
+      for (let i = 0; i < n; i++) {
+        pos.set(hit.x + (Math.random() - 0.5) * 0.8, g + 0.4 + Math.random() * 0.8, hit.z + (Math.random() - 0.5) * 0.8);
+        vel.set((Math.random() - 0.5) * 4, 1.5 + Math.random() * 3.5, (Math.random() - 0.5) * 4);
+        this.spawn(chunkGeo, debrisSnowMat, 0.1 + Math.random() * 0.18, pos, vel);
+      }
+    }
   }
 
   update(dt) {
@@ -236,8 +270,8 @@ export class SnowmanFx {
       const w = this.wobbles[i];
       w.t += dt;
       const k = Math.max(0, 1 - w.t / 1.1);
-      w.mesh.rotation.z = w.base + Math.sin(w.t * 22) * 0.16 * k;
-      w.mesh.rotation.x = Math.sin(w.t * 17) * 0.08 * k;
+      w.mesh.rotation.z = w.baseZ + Math.sin(w.t * 22) * w.amp * k;
+      w.mesh.rotation.x = w.baseX + Math.sin(w.t * 17) * w.amp * 0.5 * k;
       if (k === 0) this.wobbles.splice(i, 1);
     }
   }

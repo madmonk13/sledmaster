@@ -43,6 +43,7 @@ If you add a file under `src/`, add it to `SHELL` in `sw.js` and bump `CACHE` so
 - Ramps: `rampsFor()` in `src/terrain.js`.
 - Booster pads: placement in `padsFor()` in `src/terrain.js`; strength `PAD_KICK`, `PAD_SURGE`, `PAD_ACCEL` in `src/physics.js`.
 - Snowmen: placement in `snowmenFor()` in `src/terrain.js`; `SHATTER_SPEED` (smash vs stop) and `SHATTER_KEEP` (speed kept) in `src/physics.js`.
+- Trees and igloos: placement in `obstaclesFor()` in `src/terrain.js`; `SCRAPE_LOSS` (speed scrubbed on a head-on hit) in `src/physics.js`.
 
 `tools/balance.js` simulates full-power runs across seeds and upgrade levels with a simple driver bot. To use it, open the game and run this in the browser console:
 
@@ -51,3 +52,7 @@ const { runBalance } = await import('/tools/balance.js'); await runBalance()
 ```
 
 To swap in real models later, replace the geometry built in `src/sled.js`. The physics only uses the sled's position and facing direction.
+
+## Credits
+
+- “Igloo” by Poly by Google, [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/), via Poly Pizza (`models/igloo.glb`, unmodified).
