@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>SledMaster</title>
+  <meta name="description" content="Launch a penguin down an endless snowy slope, collect coins and upgrade your sled.">
+  <meta name="theme-color" content="#5aa9e6">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SledMaster">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- In-run HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-row">
+      <div class="stat"><span class="label">Distance</span><span id="hud-dist" class="value">0 m</span></div>
+      <div class="stat"><span class="label">Speed</span><span id="hud-speed" class="value">0 km/h</span></div>
+      <div class="stat"><span class="label">Coins</span><span id="hud-coins" class="value">0</span></div>
+    </div>
+    <div id="hud-best" class="hud-sub"></div>
+    <div id="fuel-wrap" class="hidden"><span>FUEL</span><div class="bar"><div id="fuel-bar"></div></div></div>
+  </div>
+  <button id="btn-end" class="small-btn hidden">End run</button>
+
+  <!-- Aiming UI -->
+  <div id="aim-ui" class="hidden">
+    <div id="aim-hint">Drag back to pull · sideways to aim · release to launch</div>
+    <div id="aim-keys">Keyboard: ↑↓ power · ←→ aim · Space to launch</div>
+    <div id="power-wrap"><div id="power-bar"></div><span id="power-label">Power 0%</span></div>
+  </div>
+
+  <div id="toast"></div>
+  <button id="boost-btn" class="hidden" aria-label="Boost">🚀</button>
+
+  <!-- Main menu -->
+  <div id="menu" class="overlay">
+    <div class="card">
+      <h1>Sled<span>Master</span></h1>
+      <p class="tag">Launch. Slide. Soar. Upgrade.</p>
+      <div class="pill-row">
+        <div class="pill">🪙 <b id="menu-coins">0</b></div>
+        <div class="pill">🏁 Best <b id="menu-best">0 m</b></div>
+      </div>
+      <button id="btn-play" class="btn primary">Launch!</button>
+      <button id="btn-shop" class="btn">Upgrades</button>
+      <div class="howto">
+        <div><b>Launch:</b> drag back on the screen, aim, release.</div>
+        <div><b>Steer:</b> ←/→ or A/D, or drag left/right.</div>
+        <div><b>Boost:</b> hold Space or the 🚀 button (needs a rocket).</div>
+        <div>Ice is slippery and fast. Wings let you glide off hills.</div>
+        <div><b>Snowmen:</b> smash through them at speed, but hit one slowly and you stop dead.</div>
+        <div><b>Sound:</b> M or the speaker button to mute.</div>
+      </div>
+      <button id="btn-reset" class="link-btn">Reset progress</button>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="results" class="overlay hidden">
+    <div class="card">
+      <h2 id="res-title">Run complete</h2>
+      <div id="res-best-badge" class="badge hidden">NEW BEST!</div>
+      <div class="big-dist" id="res-dist">0 m</div>
+      <table class="res-table">
+        <tr><td>Coins collected</td><td id="res-coins">0</td></tr>
+        <tr><td>Distance bonus</td><td id="res-bonus">0</td></tr>
+        <tr><td>Airtime bonus</td><td id="res-air">0</td></tr>
+        <tr class="total"><td>Earned</td><td id="res-total">0</td></tr>
+      </table>
+      <div class="pill-row"><div class="pill">🪙 Wallet <b id="res-wallet">0</b></div></div>
+      <button id="btn-again" class="btn primary">Launch again</button>
+      <button id="btn-res-shop" class="btn">Upgrades</button>
+    </div>
+  </div>
+
+  <!-- Shop -->
+  <div id="shop" class="overlay hidden">
+    <div class="card wide">
+      <div class="shop-head">
+        <h2>Workshop</h2>
+        <div class="pill">🪙 <b id="shop-coins">0</b></div>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="sled">Sled</button>
+        <button class="tab" data-tab="wings">Wings</button>
+      </div>
+      <div id="shop-grid"></div>
+      <div class="shop-foot">
+        <button id="btn-shop-back" class="btn">Back</button>
+        <button id="btn-shop-play" class="btn primary">Launch!</button>
+      </div>
+    </div>
+  </div>
+
+  <button id="btn-mute" class="small-btn" aria-label="Mute sound">🔊</button>
+
+  <script type="module" src="src/main.js"></script>
+  <script>
+    // installable / offline support (service workers need https or localhost)
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    }
+  </script>
+</body>
+</html>
