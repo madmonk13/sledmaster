@@ -37,15 +37,18 @@ export class Sfx {
     }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    // iOS treats Web Audio as "ambient" and the ring/silent switch mutes it; ask for
-    // media playback instead (Safari 16.4+), with a silent <audio> loop for older iOS
+    // Game sound, not media: "ambient" keeps the phone from showing a lock-screen / notification
+    // player for the page and lets the player's own music carry on (Safari 16.4+). The cost is
+    // that the iPhone's silent switch mutes the game. Nothing here may play an <audio> element,
+    // since that is what phones treat as music or a podcast.
     try {
-      if (navigator.audioSession) navigator.audioSession.type = 'playback';
+      if (navigator.audioSession) navigator.audioSession.type = 'ambient';
     } catch {}
-    this.keepAlive();
     const ctx = (this.ctx = new AC());
+    // go quiet whenever the page isn't on screen (locked phone, another app), and carry on when it returns
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && ctx.state !== 'running') ctx.resume().catch(() => {});
+      if (document.visibilityState === 'hidden') ctx.suspend().catch(() => {});
+      else if (ctx.state !== 'running') ctx.resume().catch(() => {});
     });
 
     const comp = ctx.createDynamicsCompressor();
@@ -94,34 +97,10 @@ export class Sfx {
   // Play a one-sample silent buffer inside the gesture; older iOS only truly starts
   // the context once something has been scheduled during a user activation.
   kick() {
-    this.keepAlive();
     const b = this.ctx.createBufferSource();
     b.buffer = this.ctx.createBuffer(1, 1, this.ctx.sampleRate);
     b.connect(this.ctx.destination);
     b.start(0);
-  }
-
-  // A looping, silent <audio> element puts the page in the media-playback category on
-  // iOS versions without navigator.audioSession, so the silent switch stops muting us.
-  keepAlive() {
-    if (navigator.audioSession) return;
-    if (!this.silentEl) {
-      const rate = 8000, n = rate / 2; // half a second of 8-bit silence
-      const buf = new ArrayBuffer(44 + n);
-      const v = new DataView(buf);
-      const str = (o, s) => [...s].forEach((ch, i) => v.setUint8(o + i, ch.charCodeAt(0)));
-      str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVEfmt ');
-      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-      v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true);
-      v.setUint16(34, 8, true); str(36, 'data'); v.setUint32(40, n, true);
-      new Uint8Array(buf, 44).fill(128);
-      const el = (this.silentEl = document.createElement('audio'));
-      el.src = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-      el.loop = true;
-      el.setAttribute('playsinline', '');
-      el.setAttribute('x-webkit-airplay', 'deny');
-    }
-    if (this.silentEl.paused) this.silentEl.play().catch(() => {}); // retried on the next gesture
   }
 
   // A looping noise source through a filter into its own gain (starts silent).

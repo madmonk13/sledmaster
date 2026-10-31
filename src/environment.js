@@ -187,9 +187,11 @@ export class Environment {
     });
     this.sunSprite = new THREE.Sprite(this.sunMat);
     this.sunSprite.scale.setScalar(360);
-    // drawn after the clouds (which don't write depth), so drifting clouds never hide them;
-    // hills and mountains still do, so they rise and set behind the scenery
-    this.moon.renderOrder = this.sunSprite.renderOrder = 1;
+    // drawn before the clouds (which don't write depth and are drawn at the default order 0), so the
+    // sun and moon sit behind drifting clouds; stars go first of all. Hills and mountains write
+    // depth, so they still hide all three as they rise and set behind the scenery
+    this.stars.renderOrder = -2;
+    this.moon.renderOrder = this.sunSprite.renderOrder = -1;
     this.sky.add(this.stars, this.moon, this.sunSprite);
     this.lightDir = lightFor(arcAngle(this.phase, 0), new THREE.Vector3()); // unit vector toward the sun or moon light
     this.tmpA = new THREE.Vector3();

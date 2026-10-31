@@ -604,7 +604,10 @@ window.addEventListener('resize', resize);
 resize();
 
 let last = performance.now();
+const IDLE_FRAME_MS = 30; // the menu, results and shop only need ~30fps behind the overlay
 function frame(now) {
+  requestAnimationFrame(frame);
+  if ((mode === 'menu' || mode === 'results' || mode === 'shop') && now - last < IDLE_FRAME_MS) return;
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   time += dt;
@@ -624,7 +627,6 @@ function frame(now) {
   updateSledVisual(dt);
   updateCamera(dt);
   renderer.render(scene, camera);
-  requestAnimationFrame(frame);
 }
 
 // load the igloo model before building the first course; without it a plain dome stands in
