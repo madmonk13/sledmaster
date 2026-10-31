@@ -1,19 +1,17 @@
-// Service worker: lets SledMaster install as an app and play offline.
+// Service worker: lets Just Sled install as an app and play offline.
 // Game files are network-first (so updates show up as soon as you're online),
 // falling back to the cached copy. Three.js and the font come from CDNs and are
 // cache-first, since those URLs never change.
 
-const CACHE = 'sledmaster-v14';
+const CACHE = 'just-sled-v15';
 const SHELL = [
   './', 'index.html', 'style.css', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png',
-  'src/main.js', 'src/terrain.js', 'src/physics.js', 'src/sled.js', 'src/upgrades.js', 'src/ui.js',
+  'src/main.js', 'src/tricks.js', 'src/terrain.js', 'src/igloo.js', 'src/physics.js', 'src/sled.js', 'src/upgrades.js', 'src/ui.js',
   'src/scenery.js', 'src/save.js', 'src/rng.js', 'src/input.js', 'src/effects.js', 'src/audio.js', 'src/environment.js',
-  'models/igloo.glb',
 ];
 const CDN = [
   'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js',
-  'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js',
   'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/utils/BufferGeometryUtils.js',
 ];
 

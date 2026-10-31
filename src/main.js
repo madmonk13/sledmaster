@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { Terrain, CHUNK_LEN, TRACK_HALF, animatePads, setIglooModel } from './terrain.js';
+import { Terrain, CHUNK_LEN, TRACK_HALF, animatePads } from './terrain.js';
 import { buildSled } from './sled.js';
 import { SledBody, SHATTER_KEEP } from './physics.js';
 import { Input } from './input.js';
@@ -11,6 +10,7 @@ import { Mountains, Clouds, Spray } from './scenery.js';
 import { Environment } from './environment.js';
 import { CoinFx, HazardFx } from './effects.js';
 import { Sfx } from './audio.js';
+import { Tricks, TRICK_KEYS, TAP_MS } from './tricks.js';
 
 const STEP = 1 / 120;
 const MAX_AIM = 0.45;
@@ -158,11 +158,13 @@ let save = loadSave();
 let stats = computeStats(save);
 let terrain = null;
 const body = new SledBody();
+const tricks = new Tricks();
 const sled = buildSled();
 scene.add(sled.group);
 sled.setLoadout(stats);
 
 const input = new Input(canvas);
+input.setSensitivity(save.touchSensitivity);
 let mode = 'menu'; // menu | aim | run | results | shop
 let run = null;
 let accumulator = 0;
@@ -183,7 +185,10 @@ const ui = new UI({
     ui.showMenu(save);
   },
   endRun: () => mode === 'run' && endRun(),
-  setBoostButton: (on) => (input.boostButton = on),
+  sensitivity: (k) => {
+    input.setSensitivity(k);
+    writeSave(save);
+  },
   buyUpgrade: (u) => {
     const level = levelOf(save, u.id);
     const cost = upgradeCost(u, level);
@@ -206,8 +211,10 @@ const ui = new UI({
     afterPurchase();
   },
   reset: () => {
+    const { touchSensitivity } = save; // resetting progress keeps your controls
     clearSave();
     save = defaultSave();
+    save.touchSensitivity = touchSensitivity;
     afterPurchase();
     newCourse();
     ui.showMenu(save);
@@ -248,7 +255,8 @@ function launch() {
   body.vel.set(Math.sin(a), 0, Math.cos(a)).multiplyScalar(stats.launchSpeed * aimState.pull);
   body.facing = a;
   body.fuel = stats.fuel;
-  run = { coins: 0, air: 0, maxZ: 0, still: 0, stagnant: 0, time: 0 };
+  run = { coins: 0, air: 0, tricks: 0, maxZ: 0, still: 0, stagnant: 0, time: 0, crashTime: 0 };
+  tricks.reset();
   accumulator = 0;
   steerSmooth = 0;
   mode = 'run';
@@ -261,10 +269,10 @@ function launch() {
 
 function endRun() {
   mode = 'results';
-  input.boostButton = false;
+  tricks.cancel();
   const distance = Math.max(0, Math.floor(run.maxZ));
   const bonus = Math.floor(distance / 5);
-  const total = run.coins + bonus + run.air;
+  const total = run.coins + bonus + run.air + run.tricks;
   const newBest = distance > save.best;
   save.coins += total;
   save.runs += 1;
@@ -273,7 +281,7 @@ function endRun() {
   if (newBest) save.best = distance;
   writeSave(save);
   sfx.runEnd(newBest);
-  ui.showResults({ distance, coins: run.coins, bonus, air: run.air, total, newBest }, save);
+  ui.showResults({ distance, coins: run.coins, bonus, air: run.air, tricks: run.tricks, total, newBest }, save);
 }
 
 // ---------- sound controls ----------
@@ -296,8 +304,23 @@ document.addEventListener('click', (e) => {
 input.onPointerUp = () => {
   if (mode === 'aim') launch();
 };
+// A trick is a quick tap of an arrow key (or a flick of the screen) in the air. ←/→ steer when held,
+// so a trick has to be pressed in the air and released within TAP_MS; ↑ and ↓ work the same way.
+function requestTrick(dir) {
+  if (mode === 'run' && body.airborne && !body.crashed) tricks.request(dir);
+}
+input.onSwipe = requestTrick;
+const trickPressedInAir = new Set();
+input.onKeyUp = (code, heldMs) => {
+  if (trickPressedInAir.delete(code) && heldMs <= TAP_MS) requestTrick(TRICK_KEYS[code]);
+};
+
 input.onKeyDown = (code) => {
   if (code === 'KeyM') return toggleMute();
+  if (TRICK_KEYS[code]) {
+    if (mode === 'run' && body.airborne && !body.crashed) trickPressedInAir.add(code);
+    if (mode !== 'aim') return; // in the aim screen ↑/↓/←/→ still set the power and direction
+  }
   if (mode === 'aim' && code === 'Space') launch();
   else if ((mode === 'menu' || mode === 'results') && (code === 'Enter' || code === 'Space')) startCourse();
 };
@@ -336,14 +359,16 @@ function updateAim(dt) {
 const tmpPocket = new THREE.Vector3();
 
 function updateRun(dt) {
-  const target = input.steer();
+  const target = body.crashed ? 0 : input.steer();
   steerSmooth += (target - steerSmooth) * Math.min(1, dt * 10);
-  const ctl = { steer: steerSmooth, boost: input.boost() };
+  const ctl = { steer: steerSmooth, boost: !body.crashed && input.boost() };
+  input.armSwipes(!body.crashed && body.airborne);
   accumulator += dt;
   while (accumulator >= STEP) {
     body.step(STEP, ctl, stats, terrain);
     accumulator -= STEP;
-    if (body.landing) onLanding(body.landing);
+    if (!body.crashed) updateTricks();
+    if (body.landing && !body.crashed) onLanding(body.landing);
   }
   if (body.padHits) {
     body.padHits = 0;
@@ -410,8 +435,35 @@ function updateRun(dt) {
   spray.emit(body, dt);
   ui.updateHud(run, body, stats, save.best);
 
+  // after a wipeout, watch the slide for a moment, then the results
+  if (body.crashed) {
+    run.crashTime += dt;
+    if (run.crashTime > 1.8) endRun();
+    return;
+  }
   // stopped, or sloshing back and forth in a valley without making progress
   if (run.time > 1 && (run.still > 1.0 || run.stagnant > 5)) endRun();
+}
+
+function onTrick({ name, points, count }) {
+  run.tricks += points;
+  sfx.chime();
+  ui.toast(count > 1 ? `${name} ×${count}! +${points}` : `${name}! +${points}`);
+}
+
+// Advance the trick in progress; touching down before it's done is a wipeout.
+function updateTricks() {
+  const done = tricks.update(STEP);
+  if (done) onTrick(done);
+  if (!body.touchdown) return;
+  const landed = tricks.land();
+  if (landed.finished) onTrick(landed.finished);
+  if (landed.crashed) {
+    body.wipeout();
+    sfx.thud('snow', 1);
+    shake = Math.max(shake, 0.6);
+    ui.toast('Bad landing!');
+  }
 }
 
 function onLanding({ impact, airTime }) {
@@ -526,6 +578,10 @@ function updateSledVisual(dt, snap = false) {
     deploy: body.deploy,
     boosting: body.boosting,
     speed: body.speed,
+    crashed: body.crashed,
+    trick: mode === 'run' && tricks.active
+      ? { axis: tricks.current.axis, sign: tricks.current.sign, progress: tricks.progress }
+      : null,
   });
 }
 
@@ -629,17 +685,9 @@ function frame(now) {
   renderer.render(scene, camera);
 }
 
-// load the igloo model before building the first course; without it a plain dome stands in
-try {
-  const gltf = await new GLTFLoader().loadAsync('models/igloo.glb');
-  setIglooModel(gltf.scene);
-} catch (e) {
-  console.warn('Igloo model failed to load; using a plain dome', e);
-}
-
 newCourse();
 ui.showMenu(save);
 requestAnimationFrame(frame);
 
 // handy for debugging from the console
-window.__sledmaster = { body, get mode() { return mode; }, get terrain() { return terrain; }, get save() { return save; }, get stats() { return stats; }, coinFx, sfx, env };
+window.__sledmaster = { input, tricks, body, get mode() { return mode; }, get terrain() { return terrain; }, get save() { return save; }, get stats() { return stats; }, coinFx, sfx, env };

@@ -21,6 +21,7 @@ export const KNOCK_KEEP = 0.8; // penguins are light: most of your speed survive
 const STALL_TIME = 1.5; // seconds for the wings to recover after a bird strike...
 const STALL_DEPTH = 0.8; // ...starting with lift cut by this share
 const SLED_R = 0.6;
+const CRASH_MU = 0.9; // sliding to a stop on your side after a bad trick landing
 // Solid obstacles (trees, igloos): the into-obstacle part of the velocity is always lost, and the
 // part along the surface is scrubbed by up to this share on a head-on hit (less when glancing).
 const SCRAPE_LOSS = 0.6;
@@ -56,6 +57,8 @@ export class SledBody {
     this.obstacleHits = []; // { obstacle, severity 0..1 (1 = head-on), speed, x, z } since last read
     this.lastObstacle = null;
     this.landing = null; // { impact, airTime } set on the step the sled lands
+    this.touchdown = false; // true on the step the sled touches snow after being airborne
+    this.crashed = false; // wiped out (landed mid-trick): no steering, no rocket, and friction brings you to a stop
   }
 
   get speed() {
@@ -66,6 +69,13 @@ export class SledBody {
     return this.airTime > 0.15;
   }
 
+  wipeout() {
+    if (this.crashed) return;
+    this.crashed = true;
+    this.boosting = false;
+    this.surge = 0;
+  }
+
   // ctl: { steer: -1..1 (positive = right), boost: bool }
   step(dt, ctl, st, terrain) {
     const p = this.pos;
@@ -73,11 +83,12 @@ export class SledBody {
     const fx = Math.sin(this.facing);
     const fz = Math.cos(this.facing);
     this.landing = null;
+    this.touchdown = false;
 
     v.y -= GRAVITY * dt;
 
     this.boosting = false;
-    if (ctl.boost && this.fuel > 0) {
+    if (ctl.boost && this.fuel > 0 && !this.crashed) {
       this.fuel = Math.max(0, this.fuel - dt);
       v.x += fx * st.thrust * dt;
       v.z += fz * st.thrust * dt;
@@ -122,6 +133,7 @@ export class SledBody {
     this.checkObstacle(terrain, ground);
     const wasAirTime = this.airTime;
     if (p.y <= ground) {
+      if (this.airborne) this.touchdown = true;
       p.y = ground;
       const n = terrain.normal(p.x, p.z, tmpN);
       const vn = v.dot(n);
@@ -280,9 +292,10 @@ export class SledBody {
     const speed = v.length();
 
     // friction
-    const mu = this.onIce ? ICE_MU : st.mu;
+    const mu = this.crashed ? CRASH_MU : this.onIce ? ICE_MU : st.mu;
     const decel = mu * GRAVITY * n.y;
     if (speed > 0) v.multiplyScalar(1 - Math.min(speed, decel * dt) / speed);
+    if (this.crashed) return;
 
     // steering turns the sled; the runners then pull the velocity round to match
     const steerScale = Math.min(1, speed / 3) * (this.onIce ? 0.6 : 1);

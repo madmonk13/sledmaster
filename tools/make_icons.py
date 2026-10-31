@@ -1,4 +1,4 @@
-"""Draws the SledMaster app icons into icons/ (penguin on a red sled on a snowy slope).
+"""Draws the Just Sled app icons into icons/ (penguin on a red sled on a snowy slope).
 
 Usage: python3 tools/make_icons.py   (needs Pillow)
 Everything important sits inside the central 80% so the icon also works as a

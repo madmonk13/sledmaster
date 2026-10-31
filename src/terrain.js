@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { mulberry32, hash1, hash2 } from './rng.js';
+import { buildIgloo, IGLOO_DOME_R, IGLOO_TUNNEL, IGLOO_HEIGHT } from './igloo.js';
 
 export const CHUNK_LEN = 100;
 export const TRACK_HALF = 26; // half-width of the sledding lane; banks rise beyond it
@@ -28,11 +29,6 @@ export const SNOWMAN_R = 0.75; // collision radius of the bottom ball
 export const SNOWMAN_H = 2.3; // clear this much air over the snow to jump a snowman
 const TREE_START_CHUNK = 2;
 const IGLOO_START_CHUNK = 3;
-// Igloo footprint in model units (models/igloo.glb, dome centred, entrance along +z):
-// the dome is a circle of radius 1 and the entrance tunnel reaches out to z = 1.3.
-const IGLOO_DOME_R = 1;
-const IGLOO_TUNNEL = { z: 1.12, r: 0.3 };
-const IGLOO_HEIGHT = 1.06;
 const IGLOO_MAX_RISE = 0.3; // most the snow may vary across an igloo's footprint, so none get half-buried
 const PENGUIN_START_CHUNK = 2;
 export const PENGUIN_R = 0.45; // collision radius at scale 1
@@ -295,38 +291,6 @@ function buildBear(scale) {
   }
   g.scale.setScalar(scale);
   g.userData.head = head;
-  return g;
-}
-
-// The igloo comes from a glTF file loaded at startup (see main.js). Until it arrives,
-// or if it fails to load, a plain snow dome stands in.
-let iglooTemplate = null;
-export function setIglooModel(model) {
-  // re-centre so the dome sits at the origin with its base at y = 0
-  const box = new THREE.Box3().setFromObject(model);
-  const domeZ = box.min.z + IGLOO_DOME_R;
-  model.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -domeZ);
-  model.traverse((o) => {
-    if (o.isMesh) {
-      o.castShadow = true;
-      o.receiveShadow = true;
-    }
-  });
-  iglooTemplate = new THREE.Group().add(model);
-}
-const fallbackDomeGeo = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
-
-function buildIgloo(scale) {
-  let g;
-  if (iglooTemplate) g = iglooTemplate.clone();
-  else {
-    g = new THREE.Group();
-    const dome = new THREE.Mesh(fallbackDomeGeo, snowBodyMat);
-    dome.scale.set(1, IGLOO_HEIGHT, 1);
-    dome.castShadow = true;
-    g.add(dome);
-  }
-  g.scale.setScalar(scale);
   return g;
 }
 

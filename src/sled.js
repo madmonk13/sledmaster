@@ -3,6 +3,10 @@
 
 import * as THREE from 'three';
 
+const TRICK_PIVOT = 0.7; // height of the body's centre above the snow, which flips and spins turn about
+const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0) };
+const UPRIGHT = new THREE.Quaternion();
+
 const mat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
 
 function box(w, h, d, material) {
@@ -269,6 +273,16 @@ export function buildSled() {
     if (o.isMesh && o.material !== flameMat && o.material !== flameCore) o.castShadow = true;
   });
 
+  // Everything above hangs off one pivot at the penguin's centre, so a trick turns the whole
+  // sled (wings, rocket and all) about its middle rather than about the runners.
+  const acro = new THREE.Group();
+  acro.position.y = TRICK_PIVOT;
+  const rig = new THREE.Group();
+  rig.position.y = -TRICK_PIVOT;
+  for (const child of [...group.children]) rig.add(child);
+  acro.add(rig);
+  group.add(acro);
+
   const runnerBase = new THREE.Color(0x8a8f99);
   const runnerGold = new THREE.Color(0xffd24a);
 
@@ -286,10 +300,20 @@ export function buildSled() {
   }
 
   let time = 0;
-  // info: { steer, airborne, deploy, boosting, speed }
+  // info: { steer, airborne, deploy, boosting, speed, crashed, trick: { axis: 'x' | 'y', sign, progress } | null }
   function animate(dt, info) {
     time += dt;
-    penguin.rotation.z += (info.steer * 0.3 - penguin.rotation.z) * Math.min(1, dt * 8);
+    // a trick is one full turn, eased in and out; with none under way (or once it's over) ease back upright
+    if (info.trick && !info.crashed) {
+      const u = info.trick.progress;
+      const eased = u * u * (3 - 2 * u);
+      acro.quaternion.setFromAxisAngle(AXES[info.trick.axis], info.trick.sign * eased * Math.PI * 2);
+    } else {
+      acro.quaternion.slerp(UPRIGHT, Math.min(1, dt * 20));
+    }
+    // wiped out: the penguin slumps over onto one side
+    const lean = info.crashed && !info.airborne ? 1.3 : info.steer * 0.3;
+    penguin.rotation.z += (lean - penguin.rotation.z) * Math.min(1, dt * 8);
     const flap = info.airborne && !info.hasWing ? Math.sin(time * 18) * 0.6 : 0;
     for (const f of flippers) {
       const side = f.userData.side;

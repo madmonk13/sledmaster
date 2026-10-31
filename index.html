@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <title>SledMaster</title>
+  <title>Just Sled</title>
   <meta name="description" content="Launch a penguin down an endless snowy slope, collect coins and upgrade your sled.">
   <meta name="theme-color" content="#5aa9e6">
   <link rel="manifest" href="manifest.json">
@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="SledMaster">
+  <meta name="apple-mobile-web-app-title" content="Just Sled">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -49,12 +49,11 @@
   </div>
 
   <div id="toast"></div>
-  <button id="boost-btn" class="hidden" aria-label="Boost">🚀</button>
 
   <!-- Main menu -->
   <div id="menu" class="overlay">
     <div class="card">
-      <h1>Sled<span>Master</span></h1>
+      <h1>Just <span>Sled</span></h1>
       <p class="tag">Launch. Slide. Soar. Upgrade.</p>
       <div class="pill-row">
         <div class="pill">🪙 <b id="menu-coins">0</b></div>
@@ -62,10 +61,12 @@
       </div>
       <button id="btn-play" class="btn primary">Launch!</button>
       <button id="btn-shop" class="btn">Upgrades</button>
+      <button id="btn-settings" class="btn">⚙️ Settings</button>
       <div class="howto">
         <div><b>Launch:</b> drag back on the screen, aim, release.</div>
         <div><b>Steer:</b> ←/→ or A/D, or drag left/right.</div>
-        <div><b>Boost:</b> hold Space or the 🚀 button (needs a rocket).</div>
+        <div><b>Boost:</b> hold Space or Shift, or touch the screen with a second finger (needs a rocket).</div>
+        <div><b>Tricks:</b> in the air, tap ↑ for a front flip, ↓ for a back flip, ← to spin left or → to spin right (hold ←/→ to steer), or flick the screen. Finish before you land or you crash. Chain tricks in one jump for 1x, 2x, 3x… and they pay out as coins.</div>
         <div>Ice is slippery and fast. Wings let you glide off hills.</div>
         <div><b>Snowmen:</b> smash through them at speed, but hit one slowly and you stop dead.</div>
         <div><b>Gas cans:</b> rare, and only once you own a rocket. Each one refills half a tank.</div>
@@ -75,7 +76,20 @@
         <div><b>Sound:</b> M or the speaker button to mute.</div>
       </div>
       <button id="btn-reset" class="link-btn">Reset progress</button>
-      <div class="credits">Igloo model: “Igloo” by Poly by Google, CC-BY 3.0</div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div id="settings" class="overlay hidden">
+    <div class="card">
+      <h2>Settings</h2>
+      <div class="pref">
+        <div class="pref-label">Touch steering <span id="sens-value" class="pref-value"></span></div>
+        <input id="sens" type="range" aria-label="Touch steering sensitivity">
+        <div class="slider-ends"><span>Gentle</span><span>Sharp</span></div>
+      </div>
+      <button id="btn-settings-done" class="btn primary">Done</button>
+      <button id="btn-settings-reset" class="link-btn">Reset settings</button>
     </div>
   </div>
 
@@ -89,6 +103,7 @@
         <tr><td>Coins collected</td><td id="res-coins">0</td></tr>
         <tr><td>Distance bonus</td><td id="res-bonus">0</td></tr>
         <tr><td>Airtime bonus</td><td id="res-air">0</td></tr>
+        <tr><td>Trick bonus</td><td id="res-tricks">0</td></tr>
         <tr class="total"><td>Earned</td><td id="res-total">0</td></tr>
       </table>
       <div class="pill-row"><div class="pill">🪙 Wallet <b id="res-wallet">0</b></div></div>

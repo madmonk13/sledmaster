@@ -3,6 +3,10 @@
 
 const KEY = 'sledmaster.save.v1';
 
+export const DEFAULT_SENSITIVITY = 1; // touch steering: 1 = a 70 px drag is full lock, lower asks for a longer drag
+export const SENS_MIN = 0.3;
+export const SENS_MAX = 1.5;
+
 export function defaultSave() {
   return {
     version: 1,
@@ -14,6 +18,7 @@ export function defaultSave() {
     runs: 0,
     totalCoins: 0,
     totalDistance: 0,
+    touchSensitivity: DEFAULT_SENSITIVITY, // preference: how touch steering responds to a drag
   };
 }
 
@@ -25,6 +30,8 @@ export function loadSave() {
     const save = { ...defaultSave(), ...data };
     save.levels = { ...(data.levels || {}) };
     save.wingsOwned = Array.isArray(data.wingsOwned) ? data.wingsOwned : [];
+    const sens = Number(save.touchSensitivity);
+    save.touchSensitivity = Number.isFinite(sens) ? Math.min(SENS_MAX, Math.max(SENS_MIN, sens)) : DEFAULT_SENSITIVITY;
     return save;
   } catch {
     return defaultSave();

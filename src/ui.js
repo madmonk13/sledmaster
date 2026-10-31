@@ -1,6 +1,7 @@
 // DOM overlays: menu, HUD, aiming meter, results and the upgrade workshop.
 
 import { UPGRADES, WINGS, upgradeCost, levelOf } from './upgrades.js';
+import { DEFAULT_SENSITIVITY, SENS_MIN, SENS_MAX } from './save.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.floor(n).toLocaleString();
@@ -8,7 +9,7 @@ export const MPH = 2.23694; // m/s -> mph
 
 export class UI {
   constructor(handlers) {
-    this.h = handlers; // { play, openShop, closeShop, endRun, buyUpgrade, buyWing, equipWing, reset }
+    this.h = handlers; // { play, openShop, closeShop, endRun, buyUpgrade, buyWing, equipWing, reset, sensitivity(k) }
     this.tab = 'sled';
     this.lastCoins = -1;
     this.toastTimer = null;
@@ -31,23 +32,39 @@ export class UI {
       };
     }
 
-    const boost = $('boost-btn');
-    const setBoost = (on) => (e) => {
-      e.preventDefault();
-      this.h.setBoostButton(on);
-      boost.classList.toggle('active', on);
+    // settings: touch steering sensitivity
+    const sens = $('sens');
+    sens.min = SENS_MIN;
+    sens.max = SENS_MAX;
+    sens.step = 0.05;
+    sens.oninput = () => this.setSensitivity(Number(sens.value));
+    $('btn-settings').onclick = () => {
+      this.showSensitivity();
+      this.show('settings');
     };
-    boost.addEventListener('pointerdown', setBoost(true));
-    boost.addEventListener('pointerup', setBoost(false));
-    boost.addEventListener('pointercancel', setBoost(false));
-    boost.addEventListener('pointerleave', setBoost(false));
+    $('btn-settings-done').onclick = () => this.showMenu(this.save);
+    $('btn-settings-reset').onclick = () => {
+      this.setSensitivity(DEFAULT_SENSITIVITY);
+    };
+  }
+
+  setSensitivity(k) {
+    this.save.touchSensitivity = k;
+    this.h.sensitivity(k);
+    this.showSensitivity();
+  }
+
+  showSensitivity() {
+    $('sens').value = this.save.touchSensitivity;
+    $('sens-value').textContent = `${Math.round(this.save.touchSensitivity * 100)}%`;
   }
 
   show(screen) {
-    for (const id of ['menu', 'results', 'shop']) $(id).classList.toggle('hidden', id !== screen);
+    for (const id of ['menu', 'results', 'shop', 'settings']) $(id).classList.toggle('hidden', id !== screen);
   }
 
   showMenu(save) {
+    this.save = save;
     $('menu-coins').textContent = fmt(save.coins);
     $('menu-best').textContent = `${fmt(save.best)} m`;
     this.show('menu');
@@ -68,7 +85,6 @@ export class UI {
     $('btn-end').classList.toggle('hidden', mode !== 'run');
     $('aim-ui').classList.toggle('hidden', mode !== 'aim');
     const hasRocket = stats && stats.fuel > 0;
-    $('boost-btn').classList.toggle('hidden', !(mode === 'run' && hasRocket));
     $('fuel-wrap').classList.toggle('hidden', !(mode === 'run' && hasRocket));
     if (mode !== 'menu') this.show(null);
   }
@@ -115,6 +131,7 @@ export class UI {
     $('res-coins').textContent = `+${fmt(r.coins)}`;
     $('res-bonus').textContent = `+${fmt(r.bonus)}`;
     $('res-air').textContent = `+${fmt(r.air)}`;
+    $('res-tricks').textContent = `+${fmt(r.tricks)}`;
     $('res-total').textContent = `+${fmt(r.total)}`;
     $('res-wallet').textContent = fmt(save.coins);
     this.setMode('results');

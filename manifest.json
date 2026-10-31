@@ -1,6 +1,6 @@
 {
-  "name": "SledMaster",
-  "short_name": "SledMaster",
+  "name": "Just Sled",
+  "short_name": "Just Sled",
   "description": "Launch a penguin down an endless snowy slope, collect coins and upgrade your sled.",
   "start_url": "./",
   "scope": "./",
