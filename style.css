@@ -133,7 +133,8 @@ html, body {
   cursor: pointer;
 }
 
-#btn-mute {
+#btn-mute,
+#btn-pause {
   left: auto;
   bottom: auto;
   top: calc(12px + env(safe-area-inset-top));
@@ -145,6 +146,7 @@ html, body {
   line-height: 36px;
   text-align: center;
 }
+#btn-pause { top: calc(56px + env(safe-area-inset-top)); }
 @media (max-width: 600px) {
   /* the HUD spans the full width on phones; tuck under its right end */
   #btn-mute { top: calc(68px + env(safe-area-inset-top)); }

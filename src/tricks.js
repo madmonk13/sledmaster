@@ -3,6 +3,8 @@
 // scores 1x its base points, the second 2x, the third 3x and so on. Landing mid-trick is a crash.
 // Points are paid out as coins at the end of the run, so they're small next to Just Ski's score.
 
+export const TRICKS_ENABLED = false; // off for now: no tricks in the air, and their help and results lines are hidden
+
 export const TRICKS = {
   up: { name: 'Front flip', axis: 'x', sign: 1, time: 0.65, points: 10 },
   down: { name: 'Back flip', axis: 'x', sign: -1, time: 0.65, points: 10 },

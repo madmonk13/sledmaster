@@ -25,7 +25,7 @@ If you add a file under `src/`, add it to `SHELL` in `sw.js` and bump `CACHE` so
 - **Launch:** drag back on the screen, aim, release (or ↑/↓ for power, ←/→ to aim, Space).
 - **Steer:** ←/→ or A/D, or drag left/right. The Settings screen has a slider for how sensitive touch steering is.
 - **Rocket:** hold Space or Shift, or touch the screen with a second finger.
-- **Tricks:** in the air, tap ↑ for a front flip, ↓ for a back flip, ← or → to spin; or flick the screen. Holding ←/→ steers instead. A trick is a full turn and takes about half a second, so finish it before you land or you wipe out and the run ends. Chain tricks in one jump for 1x, 2x, 3x… The points are paid out as coins.
+- **Tricks:** switched off for now; set `TRICKS_ENABLED` in `src/tricks.js` to `true` to bring them back. When on: in the air, tap ↑ for a front flip, ↓ for a back flip, ← or → to spin; or flick the screen. Holding ←/→ steers instead. A trick is a full turn and takes about half a second, so finish it before you land or you wipe out and the run ends. Chain tricks in one jump for 1x, 2x, 3x… The points are paid out as coins.
 
 ## Layout
 

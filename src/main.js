@@ -10,7 +10,7 @@ import { Mountains, Clouds, Spray } from './scenery.js';
 import { Environment } from './environment.js';
 import { CoinFx, HazardFx } from './effects.js';
 import { Sfx } from './audio.js';
-import { Tricks, TRICK_KEYS, TAP_MS } from './tricks.js';
+import { Tricks, TRICK_KEYS, TAP_MS, TRICKS_ENABLED } from './tricks.js';
 
 const STEP = 1 / 120;
 const MAX_AIM = 0.45;
@@ -185,6 +185,7 @@ const ui = new UI({
     ui.showMenu(save);
   },
   endRun: () => mode === 'run' && endRun(),
+  pause: (on) => setPaused(on),
   sensitivity: (k) => {
     input.setSensitivity(k);
     writeSave(save);
@@ -284,6 +285,20 @@ function endRun() {
   ui.showResults({ distance, coins: run.coins, bonus, air: run.air, tricks: run.tricks, total, newBest }, save);
 }
 
+// ---------- pause ----------
+let paused = false;
+function setPaused(on) {
+  if (on && (paused || mode !== 'run')) return;
+  if (!on && !paused) return;
+  paused = on;
+  ui.showPause(on);
+  if (!on) ui.setMode(mode, stats); // bring back the in-run buttons
+}
+// leaving the app (switching tabs, locking the phone) pauses a run
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) setPaused(true);
+});
+
 // ---------- sound controls ----------
 const muteBtn = document.getElementById('btn-mute');
 function showMute() {
@@ -307,7 +322,7 @@ input.onPointerUp = () => {
 // A trick is a quick tap of an arrow key (or a flick of the screen) in the air. ←/→ steer when held,
 // so a trick has to be pressed in the air and released within TAP_MS; ↑ and ↓ work the same way.
 function requestTrick(dir) {
-  if (mode === 'run' && body.airborne && !body.crashed) tricks.request(dir);
+  if (TRICKS_ENABLED && mode === 'run' && body.airborne && !body.crashed) tricks.request(dir);
 }
 input.onSwipe = requestTrick;
 const trickPressedInAir = new Set();
@@ -317,6 +332,8 @@ input.onKeyUp = (code, heldMs) => {
 
 input.onKeyDown = (code) => {
   if (code === 'KeyM') return toggleMute();
+  if (code === 'KeyP' || code === 'Escape') return setPaused(!paused);
+  if (paused) return;
   if (TRICK_KEYS[code]) {
     if (mode === 'run' && body.airborne && !body.crashed) trickPressedInAir.add(code);
     if (mode !== 'aim') return; // in the aim screen ↑/↓/←/→ still set the power and direction
@@ -362,7 +379,7 @@ function updateRun(dt) {
   const target = body.crashed ? 0 : input.steer();
   steerSmooth += (target - steerSmooth) * Math.min(1, dt * 10);
   const ctl = { steer: steerSmooth, boost: !body.crashed && input.boost() };
-  input.armSwipes(!body.crashed && body.airborne);
+  input.armSwipes(TRICKS_ENABLED && !body.crashed && body.airborne);
   accumulator += dt;
   while (accumulator >= STEP) {
     body.step(STEP, ctl, stats, terrain);
@@ -663,9 +680,14 @@ let last = performance.now();
 const IDLE_FRAME_MS = 30; // the menu, results and shop only need ~30fps behind the overlay
 function frame(now) {
   requestAnimationFrame(frame);
-  if ((mode === 'menu' || mode === 'results' || mode === 'shop') && now - last < IDLE_FRAME_MS) return;
+  if ((paused || (mode === 'menu' || mode === 'results' || mode === 'shop')) && now - last < IDLE_FRAME_MS) return;
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  if (paused) {
+    sfx.update({ running: false, speed: 0, contact: false, onIce: false, airborne: false, boosting: false });
+    renderer.render(scene, camera);
+    return;
+  }
   time += dt;
 
   if (mode === 'aim') updateAim(dt);

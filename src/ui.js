@@ -2,6 +2,7 @@
 
 import { UPGRADES, WINGS, upgradeCost, levelOf } from './upgrades.js';
 import { DEFAULT_SENSITIVITY, SENS_MIN, SENS_MAX } from './save.js';
+import { TRICKS_ENABLED } from './tricks.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.floor(n).toLocaleString();
@@ -11,6 +12,7 @@ export class UI {
   constructor(handlers) {
     this.h = handlers; // { play, openShop, closeShop, endRun, buyUpgrade, buyWing, equipWing, reset, sensitivity(k) }
     this.tab = 'sled';
+    for (const id of ['help-tricks', 'res-tricks-row']) $(id).classList.toggle('hidden', !TRICKS_ENABLED);
     this.lastCoins = -1;
     this.toastTimer = null;
 
@@ -21,6 +23,12 @@ export class UI {
     $('btn-shop-back').onclick = () => this.h.closeShop();
     $('btn-shop-play').onclick = () => this.h.play();
     $('btn-end').onclick = () => this.h.endRun();
+    $('btn-pause').onclick = () => this.h.pause(true);
+    $('btn-resume').onclick = () => this.h.pause(false);
+    $('btn-pause-end').onclick = () => {
+      this.h.pause(false);
+      this.h.endRun();
+    };
     $('btn-reset').onclick = () => {
       if (confirm('Reset all coins, upgrades and best distance?')) this.h.reset();
     };
@@ -43,6 +51,8 @@ export class UI {
       this.show('settings');
     };
     $('btn-settings-done').onclick = () => this.showMenu(this.save);
+    $('btn-help').onclick = () => this.show('help');
+    $('btn-help-close').onclick = () => this.showMenu(this.save);
     $('btn-settings-reset').onclick = () => {
       this.setSensitivity(DEFAULT_SENSITIVITY);
     };
@@ -60,7 +70,7 @@ export class UI {
   }
 
   show(screen) {
-    for (const id of ['menu', 'results', 'shop', 'settings']) $(id).classList.toggle('hidden', id !== screen);
+    for (const id of ['menu', 'results', 'shop', 'settings', 'help', 'pause']) $(id).classList.toggle('hidden', id !== screen);
   }
 
   showMenu(save) {
@@ -83,6 +93,7 @@ export class UI {
   setMode(mode, stats) {
     $('hud').classList.toggle('hidden', mode !== 'run');
     $('btn-end').classList.toggle('hidden', mode !== 'run');
+    $('btn-pause').classList.toggle('hidden', mode !== 'run');
     $('aim-ui').classList.toggle('hidden', mode !== 'aim');
     const hasRocket = stats && stats.fuel > 0;
     $('fuel-wrap').classList.toggle('hidden', !(mode === 'run' && hasRocket));
@@ -114,6 +125,12 @@ export class UI {
 
   resetHud() {
     this.lastCoins = -1;
+  }
+
+  // the Paused card covers the game; the in-run buttons step aside while it's up
+  showPause(on) {
+    this.show(on ? 'pause' : null);
+    for (const id of ['btn-pause', 'btn-end']) $(id).classList.toggle('hidden', on);
   }
 
   toast(text) {
