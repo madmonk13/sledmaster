@@ -150,6 +150,7 @@ html, body {
 @media (max-width: 600px) {
   /* the HUD spans the full width on phones; tuck under its right end */
   #btn-mute { top: calc(68px + env(safe-area-inset-top)); }
+  #btn-pause { top: calc(112px + env(safe-area-inset-top)); }
 }
 
 
