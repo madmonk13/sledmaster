@@ -1,4 +1,4 @@
-"""Draws the Just Sled app icons into icons/ (penguin on a red sled on a snowy slope).
+"""Draws the Just Sled app icons into icons/: a penguin flying its winged red sled through a sunset.
 
 Usage: python3 tools/make_icons.py   (needs Pillow)
 Everything important sits inside the central 80% so the icon also works as a
@@ -10,53 +10,85 @@ from PIL import Image, ImageDraw
 S = 1024  # draw large, then downscale for smooth edges
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icons")
 
+BLACK, WHITE, ORANGE = (0x23, 0x26, 0x2e), (0xf7, 0xf7, 0xf2), (0xff, 0x9a, 0x2e)
+RED, RED_DARK, GOLD = (0xd8, 0x3a, 0x2b), (0xa8, 0x2f, 0x23), (0xf5, 0xc5, 0x18)
+
 
 def lerp(a, b, t):
     return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
+def wing(d, root, tip_dir):
+    """A swept wing from the root, layered feathers fanning out along the trailing edge."""
+    rx, ry = root
+    sx = tip_dir  # -1 spreads left, 1 spreads right
+    outline = [(rx, ry), (rx + sx * 330, ry - 210), (rx + sx * 360, ry - 170),
+               (rx + sx * 300, ry - 70), (rx + sx * 200, ry + 10), (rx + sx * 60, ry + 70)]
+    d.polygon(outline, fill=(0xe9, 0xf1, 0xfa))
+    for i, (fx, fy) in enumerate([(300, -110), (240, -50), (170, 10), (95, 55)]):
+        cx, cy = rx + sx * fx, ry + fy
+        d.ellipse([cx - 62, cy - 30, cx + 62, cy + 30], fill=(0xd2, 0xe0, 0xf0) if i % 2 else (0xff, 0xff, 0xff))
+    d.line([(rx, ry), (rx + sx * 345, ry - 195)], fill=(0xc0, 0xd2, 0xe6), width=14)
+
+
+def flyer():
+    """Penguin sitting on its red sled, wings spread wide."""
+    layer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    wing(d, (430, 600), -1)
+    wing(d, (600, 600), 1)
+    # sled: deck, curled front and runners
+    d.rounded_rectangle([290, 700, 760, 760], radius=24, fill=RED)
+    d.polygon([(730, 700), (820, 610), (850, 635), (760, 735)], fill=RED_DARK)
+    d.line([(300, 800), (770, 800)], fill=(0x6e, 0x75, 0x80), width=16)
+    d.line([(770, 800), (850, 735)], fill=(0x6e, 0x75, 0x80), width=16)
+    for x in (360, 690):
+        d.line([(x, 760), (x, 800)], fill=(0x6e, 0x75, 0x80), width=12)
+    # penguin
+    d.ellipse([400, 440, 650, 740], fill=BLACK)  # body
+    d.ellipse([455, 510, 625, 735], fill=WHITE)  # belly
+    d.ellipse([430, 300, 640, 500], fill=BLACK)  # head
+    d.ellipse([480, 340, 640, 480], fill=WHITE)  # face
+    for ex in (530, 588):
+        d.ellipse([ex, 375, ex + 32, 407], fill=BLACK)  # eyes
+        d.ellipse([ex + 11, 381, ex + 22, 392], fill=WHITE)
+    d.polygon([(560, 425), (612, 425), (586, 470)], fill=ORANGE)  # beak
+    d.rounded_rectangle([425, 480, 655, 515], radius=18, fill=(0xe8, 0x4a, 0x3a))  # scarf
+    d.polygon([(440, 495), (300, 450), (290, 495), (440, 520)], fill=(0xe8, 0x4a, 0x3a))
+    d.ellipse([600, 690, 710, 735], fill=ORANGE)  # feet
+    d.ellipse([650, 680, 760, 725], fill=ORANGE)
+    return layer
+
+
+def coin(d, cx, cy, r):
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=GOLD, outline=(0xc9, 0x96, 0x0c), width=max(3, r // 6))
+    d.ellipse([cx - r * 0.45, cy - r * 0.45, cx + r * 0.45, cy + r * 0.45], outline=(0xff, 0xe2, 0x7a), width=max(3, r // 7))
+
+
 def draw():
     img = Image.new("RGB", (S, S))
     d = ImageDraw.Draw(img)
-    top, bottom = (0x4f, 0xa3, 0xe3), (0xd4, 0xec, 0xff)
+    top, mid, bottom = (0x4b, 0x2a, 0x7a), (0xf0, 0x6e, 0x5a), (0xff, 0xc8, 0x6b)
     for y in range(S):
-        d.line([(0, y), (S, y)], fill=lerp(top, bottom, y / S))
+        t = y / S
+        d.line([(0, y), (S, y)], fill=lerp(top, mid, t / 0.55) if t < 0.55 else lerp(mid, bottom, (t - 0.55) / 0.45))
 
-    # mountains and a cloud behind
-    d.polygon([(90, 640), (330, 300), (560, 640)], fill=(0xa9, 0xbf, 0xd6))
-    d.polygon([(260, 380), (330, 300), (395, 380), (360, 400), (330, 375), (295, 400)], fill="white")
-    d.polygon([(480, 640), (760, 250), (1000, 640)], fill=(0x93, 0xab, 0xc6))
-    d.polygon([(680, 360), (760, 250), (835, 355), (795, 380), (760, 350), (720, 385)], fill="white")
-    for cx, cy, r in [(250, 215, 62), (320, 190, 80), (400, 215, 60)]:
-        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill="white")
+    # setting sun and drifting cloud bands
+    d.ellipse([560, 560, 900, 900], fill=(0xff, 0xe3, 0x8a))
+    for x0, y0, w in [(80, 250, 260), (640, 180, 240), (700, 460, 220)]:
+        d.rounded_rectangle([x0, y0, x0 + w, y0 + 34], radius=17, fill=(0xff, 0xb3, 0x9a))
 
-    # snow slope
-    d.polygon([(0, 700), (S, 560), (S, S), (0, S)], fill=(0xf7, 0xfb, 0xff))
-    d.polygon([(0, 760), (S, 640), (S, 660), (0, 790)], fill=(0xe4, 0xed, 0xf6))
+    # rolling hills in evening shade
+    d.ellipse([-300, 760, 600, 1300], fill=(0xb7, 0xa6, 0xd8))
+    d.ellipse([380, 800, 1400, 1360], fill=(0xd9, 0xcc, 0xef))
+    d.ellipse([-200, 880, 900, 1400], fill=(0xf4, 0xef, 0xfb))
 
-    # sled (tilted with the slope) and runners
-    d.polygon([(250, 742), (790, 672), (802, 712), (262, 784)], fill=(0xc0, 0x39, 0x2b))
-    d.polygon([(790, 672), (850, 620), (868, 640), (802, 712)], fill=(0xa8, 0x2f, 0x23))
-    d.line([(255, 822), (812, 750)], fill=(0x6e, 0x75, 0x80), width=16)
-    d.line([(812, 750), (862, 700)], fill=(0x6e, 0x75, 0x80), width=16)
-    for x, y in [(330, 785), (700, 735)]:
-        d.line([(x, y), (x + 4, y + 28)], fill=(0x6e, 0x75, 0x80), width=12)
+    # coin trail curving up behind the sled
+    for cx, cy, r in [(150, 760, 30), (230, 690, 36), (320, 640, 42)]:
+        coin(d, cx, cy, r)
 
-    # penguin sitting on the sled
-    black, white, orange = (0x23, 0x26, 0x2e), (0xf7, 0xf7, 0xf2), (0xff, 0x9a, 0x2e)
-    d.ellipse([400, 440, 650, 760], fill=black)  # body
-    d.ellipse([455, 520, 625, 755], fill=white)  # belly
-    d.ellipse([430, 300, 640, 500], fill=black)  # head
-    d.ellipse([480, 340, 640, 480], fill=white)  # face
-    d.ellipse([530, 375, 562, 407], fill=black)  # eye
-    d.ellipse([588, 375, 620, 407], fill=black)
-    d.ellipse([541, 381, 552, 392], fill="white")
-    d.ellipse([599, 381, 610, 392], fill="white")
-    d.polygon([(560, 425), (612, 425), (586, 470)], fill=orange)  # beak
-    d.rounded_rectangle([425, 480, 655, 515], radius=18, fill=(0xe8, 0x4a, 0x3a))  # scarf
-    d.polygon([(440, 495), (330, 470), (320, 510), (440, 520)], fill=(0xe8, 0x4a, 0x3a))  # scarf tail
-    d.ellipse([610, 700, 720, 745], fill=orange)  # feet out front
-    d.ellipse([660, 690, 770, 735], fill=orange)
+    p = flyer().rotate(14, resample=Image.BICUBIC, center=(512, 600)).resize((760, 760), Image.LANCZOS)
+    img.paste(p, (170, 60), p)
     return img
 
 
