@@ -81,6 +81,7 @@ const COLOR_SNOW =new THREE.Color(0xf7fbff);
 const COLOR_BANK = new THREE.Color(0xe4edf6);
 const ICE_DEEP = new THREE.Color(0x8fcdee);
 const ICE_RIM = new THREE.Color(0xd6f0fc);
+const ICE_LIFT = 0.05; // the ice sheet is drawn this far above the snow mesh
 const iceMat = new THREE.MeshPhongMaterial({
   vertexColors: true, shininess: 90, specular: 0xbfe6ff,
   polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
@@ -499,6 +500,14 @@ export class Terrain {
     return hc + (this.baseHeight(x0, z1) - hc) * (1 - fx) + (this.baseHeight(x1, z0) - hc) * (1 - fz);
   }
 
+  // Where the player is drawn standing. The ice sheet follows the drawn snow mesh, whose flat
+  // triangles can sit a little above the smooth surface the physics uses, so on ice the player
+  // is lifted onto the top of the sheet instead of sinking into it.
+  standHeight(x, z) {
+    const h = this.height(x, z);
+    return this.isIce(x, z) ? Math.max(h, this.meshHeight(x, z) + ICE_LIFT) : h;
+  }
+
   normal(x, z, out = new THREE.Vector3()) {
     const e = 0.3;
     const dx = (this.height(x + e, z) - this.height(x - e, z)) / (2 * e);
@@ -904,7 +913,7 @@ export class Terrain {
     const sin = Math.sin(p.rot), cos = Math.cos(p.rot);
     const slopeX = hx * cos - hz * sin; // rise per metre along the penguin's own x and z
     const slopeZ = hx * sin + hz * cos;
-    const ice = this.isIce(p.x, p.z) ? 0.05 : 0; // the ice sheet sits this far above the snow
+    const ice = this.isIce(p.x, p.z) ? ICE_LIFT : 0;
     p.mesh.position.set(p.x, this.meshHeight(p.x, p.z) + ice, p.z);
     for (const foot of p.mesh.userData.feet) {
       foot.position.y = PENGUIN_FOOT_Y + slopeX * foot.position.x + slopeZ * foot.position.z;
@@ -1237,7 +1246,7 @@ export class Terrain {
     const c = new THREE.Color();
     const push = (u, w) => {
       const x = p.x + u * p.rx, z = p.z + w * p.rz;
-      verts.push(x, this.meshHeight(x, z) + 0.05, z);
+      verts.push(x, this.meshHeight(x, z) + ICE_LIFT, z);
       const r = Math.hypot(u, w);
       c.copy(ICE_DEEP).lerp(ICE_RIM, smooth((r - 0.72) / 0.28)).offsetHSL(0, 0, (rand() - 0.5) * 0.03);
       cols.push(c.r, c.g, c.b);

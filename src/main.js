@@ -567,7 +567,7 @@ const F = new THREE.Vector3(), U = new THREE.Vector3(), X = new THREE.Vector3(),
 
 function updateSledVisual(dt, snap = false) {
   const p = body.pos;
-  const g = terrain.height(p.x, p.z);
+  const g = terrain.standHeight(p.x, p.z);
   sled.group.position.set(p.x, Math.max(p.y, g), p.z);
   F.set(Math.sin(body.facing), 0, Math.cos(body.facing));
   if (body.airborne) {
