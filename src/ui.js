@@ -46,12 +46,14 @@ export class UI {
     sens.max = SENS_MAX;
     sens.step = 0.05;
     sens.oninput = () => this.setSensitivity(Number(sens.value));
-    $('btn-settings').onclick = () => {
-      this.showSensitivity();
-      this.show('settings');
-    };
+    $('btn-settings').onclick = () => this.showSettings();
     $('btn-settings-done').onclick = () => this.showMenu(this.save);
     $('btn-help').onclick = () => this.show('help');
+    $('btn-trouble-close').onclick = () => $('trouble').classList.add('hidden');
+    $('btn-trouble-settings').onclick = () => {
+      $('trouble').classList.add('hidden');
+      this.showSettings();
+    };
     $('btn-help-close').onclick = () => this.showMenu(this.save);
     $('btn-settings-reset').onclick = () => {
       this.setSensitivity(DEFAULT_SENSITIVITY);
@@ -70,6 +72,7 @@ export class UI {
   }
 
   show(screen) {
+    if (screen !== 'results') $('trouble').classList.add('hidden');
     for (const id of ['menu', 'results', 'shop', 'settings', 'help', 'pause']) $(id).classList.toggle('hidden', id !== screen);
   }
 
@@ -133,12 +136,26 @@ export class UI {
     for (const id of ['btn-pause', 'btn-end']) $(id).classList.toggle('hidden', on);
   }
 
+  // After a very short run, point a touchscreen player at the steering sensitivity: at most once
+  // per visit, and never once they've moved the slider off its default.
+  offerSettings(save) {
+    if (this.troubleShown || !matchMedia('(pointer: coarse)').matches) return;
+    if (save.touchSensitivity !== DEFAULT_SENSITIVITY) return;
+    this.troubleShown = true;
+    $('trouble').classList.remove('hidden');
+  }
+
   toast(text) {
     const el = $('toast');
     el.textContent = text;
     el.classList.remove('show');
     void el.offsetWidth;
     el.classList.add('show');
+  }
+
+  showSettings() {
+    this.showSensitivity();
+    this.show('settings');
   }
 
   showResults(r, save) {

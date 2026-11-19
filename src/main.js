@@ -165,6 +165,7 @@ sled.setLoadout(stats);
 
 const input = new Input(canvas);
 input.setSensitivity(save.touchSensitivity);
+const SHORT_RUN = 120; // coming to a stop before this many metres offers the steering setting
 let mode = 'menu'; // menu | aim | run | results | shop
 let run = null;
 let accumulator = 0;
@@ -184,7 +185,7 @@ const ui = new UI({
     mode = 'menu';
     ui.showMenu(save);
   },
-  endRun: () => mode === 'run' && endRun(),
+  endRun: () => mode === 'run' && endRun(true),
   pause: (on) => setPaused(on),
   sensitivity: (k) => {
     input.setSensitivity(k);
@@ -268,7 +269,7 @@ function launch() {
   sfx.launch(aimState.pull);
 }
 
-function endRun() {
+function endRun(manual = false) {
   mode = 'results';
   tricks.cancel();
   const distance = Math.max(0, Math.floor(run.maxZ));
@@ -283,6 +284,7 @@ function endRun() {
   writeSave(save);
   sfx.runEnd(newBest);
   ui.showResults({ distance, coins: run.coins, bonus, air: run.air, tricks: run.tricks, total, newBest }, save);
+  if (!manual && distance < SHORT_RUN) ui.offerSettings(save); // not when the player ended it themselves
 }
 
 // ---------- pause ----------
